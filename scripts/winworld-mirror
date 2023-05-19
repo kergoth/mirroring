@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+WINWORLD_FETCH_ARGS="${WINWORLD_FETCH_ARGS:--r -t 15m}"
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+PATH="$scriptdir/WinWorld:$scriptdir:$PATH"
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+usage() {
+    cat >&2 <<END
+${0##*/} [options] [ARGS..]"
+
+Common Options:"
+
+  -u                 Update mirror."
+  -c DIRECTORY     Change to DIRECTORY before mirroring."
+  -a ARGS           Change default underlying tool arguments."
+
+Winworld Mirror Options:"
+
+  -v                    Verbose."
+  -d DL_DIRECTORY    Download to DL_DIRECTORY, not the current directory or DIRECTORY."
+  -i INCLUDE_FILTER  Only fetch downloads matching the specified regex filter."
+  -x EXCLUDE_FILTER  Don't fetch downloads matching the specified regex filter."
+END
+    exit 2
+}
+
+process_arguments() {
+    common_process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    ORIG_OPTIND=$OPTIND
+    OPTIND=0
+    verbose=
+    dldir=.
+    include=
+    exclude=
+    while getopts vd:i:x:h opt; do
+        case "$opt" in
+        v)
+            verbose=1
+            ;;
+        d)
+            dldir="$OPTARG"
+            ;;
+        i)
+            include="$OPTARG"
+            ;;
+        x)
+            exclude="$OPTARG"
+            ;;
+        \? | h)
+            usage
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    OPTIND=$((OPTIND + ORIG_OPTIND - 1))
+}
+
+ARGS=
+process_arguments "$@"
+shift $((OPTIND - 1)) || :
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+    if [ -z "$update" ] && [ -e .done ]; then
+        exit 0
+    fi
+fi
+
+if [ -n "$update" ] || ! [ -e ./ProductInfo/.done ]; then
+    msg "Fetching WinWorld product pages for scraping metadata"
+    run fetch-products
+    touch ProductInfo/.done
+fi
+
+if [ -n "$update" ] || ! [ -e ./DownloadsInfo/.done ]; then
+    msg "Fetching WinWorld download pages for scraping download urls"
+    run fetch-download-pages
+    touch DownloadsInfo/.done
+fi
+
+if [ -n "$update" ] || ! [ -e ./ProductInfo/.json.done ]; then
+    msg "Scraping downloaded WinWorld product and download pages"
+    run info-scrape ${verbose:+-v} ${include:+-i "$include"} ${exclude:+-x "$exclude"}
+    if [ -z "$include" ]; then
+        touch ./ProductInfo/.json.done
+    fi
+fi
+
+case "$dldir" in
+/Volumes/*)
+    volume=$(echo "$dldir" | cut -d/ -f1-3)
+    if ! df | grep -q " $volume$"; then
+        die "Volume ${volume##*/} not mounted"
+    fi
+    ;;
+esac
+
+msg "Downloading WinWorld files"
+# shellcheck disable=SC2086
+run fetch-downloads -o "$dldir" ${verbose:+-v} ${include:+-i "$include"} ${exclude:+-x "$exclude"} ${ARGS:-${WINWORLD_FETCH_ARGS:-}}
+if [ -n "$directory" ] && [ -z "$include" ]; then
+    touch .done
+fi

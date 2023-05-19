@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+cd "$(dirname "$0")" && cd ..
+nix-shell --run true
+gem install specific_install
+gem specific_install https://github.com/davidrg/wayback-machine-downloader

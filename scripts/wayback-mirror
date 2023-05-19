@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+WAYBACK_ARGS="${WAYBACK_ARGS:---all-timestamps}"
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+PATH="$scriptdir:$scriptdir/extras:$PATH"
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+url_dest() {
+    local url=$1
+    dest="${url#*://}"
+    case "$dest" in
+        */) ;;
+        *)
+            dest="$(dirname "$dest")"
+            ;;
+    esac
+    echo "$dest"
+}
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+if [ $# -lt 1 ]; then
+    die "Usage: %s URL [DESTINATION [ARGS..]]" "${0##*/}"
+fi
+url=$1
+shift
+if [ $# -gt 0 ]; then
+    dest=$1
+    shift
+else
+    if has unfurl; then
+        dest="$(echo "$url" | unfurl domains)_IA"
+    else
+        dest=$(url_dest "${url%/*}")_IA
+    fi
+fi
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+if [ -e "$dest/.done" ] && [ -z "$update" ]; then
+    exit 0
+fi
+
+# shellcheck disable=SC2086
+run wayback_machine_downloader ${ARGS:-$WAYBACK_ARGS} "$@" -d "$dest" "$url"
+run wayback-merge "$dest" "${dest%/}_merged"
+
+touch "$dest/.done"

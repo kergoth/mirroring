@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [ "${OSTYPE:-}" ]; then
+    NCPUS="$(sysctl -n hw.ncpu)"
+else
+    NCPUS="$(grep -c processor /proc/cpuinfo)"
+fi
+WGET_ARGS="${WGET_ARGS:--mkxKE -l 0 -np -e robots=off --content-disposition --trust-server-names}"
+WAYBACK_ARGS="${WAYBACK_ARGS:---all-timestamps}"
+
+usage() {
+    echo >&2 "${0##*/} [options] PROJECT[..]"
+    echo >&2
+    echo >&2 "Options:"
+    echo >&2
+    echo >&2 "  -a WGET_ARGS  Specify wget arguments. Default: $WGET_ARGS"
+    echo >&2 "  -s SUBDIR  Specify subdirectory to fetch."
+    echo >&2 "  -f REGEX   Specify regex filter for downloads."
+    echo >&2 "  -u    Update. Download even for sites we've already downloaded, to update them."
+    echo >&2 "  -P    Execute the mirror commands in parallel."
+    echo >&2 "  -w    Wayback machine archive."
+    echo >&2 "  -n    Dry run."
+    echo >&2 "  -v    Verbose."
+    exit 2
+}
+
+main () {
+    process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+    trap 'rm -rf "$tmpdir"' EXIT INT TERM
+
+    # # download all the pages on which direct download links are
+    # wget -w 1 -np -m -A download https://sourceforge.net/projects/$project/files/
+    (
+        cd "$tmpdir"
+        for project; do
+            local url="https://sourceforge.net/projects/$project/files${subdir:+/$subdir/}"
+            if [ -n "$wayback" ]; then
+                wayback_cmd "$url" .
+            else
+                wget_cmd "$url" "-A download,download.html -w 1 $extra_wget_args"
+            fi
+        done | run_commands
+    )
+
+    if [ -z "$dry_run" ]; then
+        mkdir -p downloads.sourceforge.net
+        cd downloads.sourceforge.net
+        # extract those links
+        grep -Rh refresh "$tmpdir" \
+            | grep -o "https://[^\\?]*" \
+            | while read -r url; do
+                # download each of the extracted URLs, put into $projectname/
+                # while read url; do wget --content-disposition -x -nH --cut-dirs=1 "${url}"; done < urllist
+                wget_cmd "$url" "-x -w 1"
+            done \
+                | if [ -n "$filter" ]; then grep -E "$filter"; else cat; fi \
+                | run_commands '%s -nH && find project -iname "*?viasf=1" | sed -e "s/\?viasf=1//" | tr "\\n" "\\0" | xargs -t0 -I"{}" mv -v "{}?viasf=1" "{}"'
+
+        # for project; do
+        #     find *.dl.sourceforge.net/"project/$project/files" -iname "*?viasf=1"
+        # done \
+        #     | sed -e 's/\?viasf=1$//' \
+        #     | tr '\n' '\0' \
+        #     | xargs -t0 -I"{}" echo mv -v "{}?viasf=1" "{}"
+    fi
+}
+
+process_arguments () {
+    dry_run=
+    verbose=
+    update=
+    parallel=
+    extra_wget_args=
+    subdir=
+    filter=
+    wayback=
+    while getopts a:s:f:uPwnvh opt; do
+        case "$opt" in
+            a)
+                extra_wget_args="$OPTARG"
+                ;;
+            s)
+                subdir="$OPTARG"
+                ;;
+            f)
+                filter="$OPTARG"
+                ;;
+            u)
+                update=1
+                ;;
+            P)
+                parallel=1
+                ;;
+            w)
+                wayback=1
+                ;;
+            n)
+                dry_run=1
+                verbose=1
+                ;;
+            v)
+                verbose=1
+                ;;
+            \? | h)
+                usage
+                ;;
+        esac
+    done
+}
+
+msg() {
+    fmt="$1"
+    # shellcheck disable=SC2059
+    printf "$fmt\n" "$@" >&2
+}
+
+die() {
+    msg "$@"
+    exit 1
+}
+
+wget_cmd () {
+    local url=$1
+    local extra_args=${2:-}
+    # shellcheck disable=SC2086
+    printcmd wget $WGET_ARGS | tr -d '\n'
+    if [ -n "$extra_args" ]; then
+        printf ' %s' "$extra_args"
+    fi
+    printf ' '
+    printcmd "$url"
+}
+
+wayback_cmd () {
+    local url=$1
+    local dest=$2
+    local args=${3:-}
+
+    {
+        printcmd wayback_machine_downloader $WAYBACK_ARGS -d "$dest" "$url" | tr -d '\n'
+        printf ' %s\n' "$args"
+    }
+}
+
+printcmd () {
+    python3 -c 'import subprocess,sys; print(subprocess.list2cmdline(sys.argv[1:]))' "$@"
+}
+
+url_dest () {
+    local url=$1
+    dest="${url#*://}"
+    case "$dest" in
+        */)
+            ;;
+        *)
+            dest="$(dirname "$dest")"
+            ;;
+    esac
+    echo "$dest"
+}
+
+run_commands_update () {
+    while IFS=$'\t' read -r dest cmd; do
+        if [ -z "$update" ] && [ -e "$dest/.done" ]; then
+            continue
+        fi
+        if [ -z "$dest" ] || [ "$dest" = "." ]; then
+            die "Invalid dest $dest for $cmd"
+        fi
+
+        if [ -n "$dry_run" ]; then
+            printf '%s\n' "$cmd"
+        else
+            printf 'mkdir -p "%s" && %s && touch "%s/.done" || { echo >&2 "Error fetching to %s"; exit 1; }\n' "$dest" "$cmd" "$dest" "$dest"
+        fi
+    done | \
+    tr '\n' '\0' | \
+    if [ -n "$dry_run" ]; then
+        xargs -0 $XARGS_ARGS -I"{}" -- sh -c "python3 -c 'import subprocess,sys; print(subprocess.list2cmdline(sys.argv[1:]))' {}"
+    else
+        XARGS_ARGS="${XARGS_ARGS:+$XARGS_ARGS }${verbose:+ -t}${parallel:+ -P "$NCPUS"}"
+        xargs -t0 $XARGS_ARGS -I"{}" -- sh -c '{}'
+    fi
+}
+
+run_commands () {
+    fmt="${1:-%s}"
+    while IFS=$'\t' read -r cmd; do
+        if [ -n "$dry_run" ]; then
+            printf '%s\n' "$cmd"
+        else
+            # shellcheck disable=SC2059
+            printf "( $fmt )"' || { echo >&2 "Error fetching"; exit 1; }\n' "$cmd" 
+        fi
+    done | \
+    tr '\n' '\0' | \
+    if [ -n "$dry_run" ]; then
+        xargs -0 $XARGS_ARGS -I"{}" -- sh -c "python3 -c 'import subprocess,sys; print(subprocess.list2cmdline(sys.argv[1:]))' {}"
+    else
+        XARGS_ARGS="${XARGS_ARGS:+$XARGS_ARGS }${verbose:+ -t}${parallel:+ -P "$NCPUS"}"
+        xargs -t0 $XARGS_ARGS -I"{}" -- sh -c '{}'
+    fi
+}
+
+main "$@"

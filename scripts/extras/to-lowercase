@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+dest=$1
+shift
+
+to_lower() {
+    # find "$dest" "$@" |
+    #     grep -vFx "$dest" |
+    #     tac >"$tmpdir/f"
+    # cat "$tmpdir/f" | tr '[:upper:]' '[:lower:]' >"$tmpdir/l"
+    # paste "$tmpdir/f" "$tmpdir/l" |
+    #     while read -r from to; do
+    #         if [ "$from" != "$to" ]; then
+    #             mkdir -p "${to%/*}"
+    #             if [ -e "$to" ]; then
+    #                 echo >&2 "Error: $to already exists renaming $from to $to"
+    #                 exit 1
+    #             fi
+    #             mv -v "$from" "$to"
+    #         fi
+    #     done
+    find "$dest" "$@" |
+        grep -vFx "$dest" |
+        tac |
+        while read -r d; do
+            dest="${d%/*}/$(basename "$d" | tr '[:upper:]' '[:lower:]')"
+            if [ -e "$dest" ]; then
+                echo >&2 "Error: $dest already exists renaming $d"
+                exit 1
+            fi
+            mv -v "$d" "${d%/*}/$(basename "$d" | tr '[:upper:]' '[:lower:]')"
+        done
+}
+
+to_lower -type d "$@"
+to_lower \( -not -type d \) "$@"

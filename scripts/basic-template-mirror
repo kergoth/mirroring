@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+# Argument handling
+die "Unimplemented"
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+if [ -e "$dest/.done" ] && [ -z "$update" ]; then
+    exit 0
+fi
+
+# Main
+
+touch "$dest/.done"

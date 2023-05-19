@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+MIME_TYPES=/etc/apache2/mime.types
+TAB=$'\t'
+
+ret=0
+for filename; do
+    mime=$(file -b --mime-type "$filename")
+    if line=$(grep "^$mime	" "$MIME_TYPES"); then
+        base=$(basename "$filename")
+        ext=$(echo "$base" | sed -e 's/.*\.//' | tr '[:upper:]' '[:lower:]')
+        if [ "$ext" = "$base" ]; then
+            ext=
+        fi
+        if [ "$ext" = "lftp-pget-status" ]; then
+            # Incomplete file transfer
+            continue
+        fi
+
+        expected=$(echo "$line" | cut -d"$TAB" -f2- | xargs)
+        if ! echo "$expected" | grep -qw "$ext"; then
+            echo "$filename: $mime unexpected${ext:+ for .$ext}, expected one of: $expected" >&2
+            ret=1
+        fi
+    fi
+done
+exit $ret

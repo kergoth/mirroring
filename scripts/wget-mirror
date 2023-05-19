@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+WGET_ARGS="${WGET_ARGS:---mirror -kxK -l 0 -np -e robots=off}"
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+url_dest() {
+    local url=$1
+    dest="${url#*://}"
+    case "$dest" in
+        */) ;;
+        *)
+            dest="$(dirname "$dest")"
+            ;;
+    esac
+    echo "$dest"
+}
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+if [ $# -lt 1 ]; then
+    die "Usage: %s URL [ARGS..]" "${0##*/}"
+fi
+url=$1
+shift
+dest=$(url_dest "$url")
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+if [ -e "$dest/.done" ] && [ -z "$update" ]; then
+    exit 0
+fi
+
+# shellcheck disable=SC2086
+wget ${ARGS:-$WGET_ARGS} "$@" "$url"
+
+touch "$dest/.done"

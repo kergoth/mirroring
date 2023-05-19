@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# TODO: look at https://gist.github.com/rodw/3073987 for timestamped archival
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+repo=$1
+shift
+if [ $# -ne 0 ]; then
+    dest=$1
+    shift
+else
+    dest="$(echo "$repo" | sed -e 's#/$##; s#\.git$##; s#.*/##;')"
+fi
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+trap 'rm -rf "$tmpdir"' EXIT INT TERM
+
+user=$(echo "$repo" | cut -d/ -f1)
+repo_name=$(echo "$repo" | cut -d/ -f2)
+if [ "$dest" = . ]; then
+    repodir=$(dirname "$PWD")
+    base=$(basename "$PWD")
+else
+    repodir=$PWD
+    base=$dest
+fi
+
+if [ -e "$dest/.done" ] && [ -z "$update" ]; then
+    exit 0
+fi
+
+if [ "$base" != "$repo_name" ]; then
+    echo >&2 "Error: base $base != $repo_name, might need to refetch and rsync"
+    exit 1
+fi
+
+if command -v git-lfs >/dev/null 2>&1; then
+    set -- --lfs "$@"
+fi
+ln -s "$repodir" "$tmpdir/repositories"
+
+github-backup ${GITHUB_TOKEN:+-t "$GITHUB_TOKEN"} --all --pull-details ${ARGS:+$ARGS} -R "$repo_name" -o "$tmpdir" "$user" || :
+github-backup ${GITHUB_TOKEN:+-t "$GITHUB_TOKEN"} --releases --assets ${ARGS:+$ARGS} -R "$repo_name" -o "$tmpdir" "$user" || :
+if ! [ -d "$repodir/$repo_name/repository" ]; then
+    exit 1
+fi
+
+touch "$dest/.done"

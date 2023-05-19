@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+repo=$1
+shift
+if [ $# -ne 0 ]; then
+    dest=$1
+    shift
+else
+    dest="$(echo "$repo" | sed -e 's#/$##; s#\.git$##; s#.*/##;')"
+fi
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+if [ -e "$dest/.done" ] && [ -z "$update" ]; then
+    exit 0
+fi
+
+if ! [ -d "$dest/.git" ]; then
+    git clone --recursive "$repo" "$dest" -- "$@"
+    cd "$dest"
+else
+    cd "$dest"
+    git fetch --all --tags --force
+    git pull
+fi
+
+touch "$dest/.done"

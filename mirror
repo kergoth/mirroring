@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2317
+
+set -euo pipefail
+
+scriptdir="$(cd "$(dirname "$0")" && pwd -P)"
+PATH="$scriptdir/scripts:$scriptdir/extras:$PATH"
+
+# shellcheck source=./scripts/common.sh
+. "$scriptdir/scripts/common.sh"
+
+if [ -n "${OSTYPE:-}" ]; then
+    NCPUS="$(sysctl -n hw.ncpu)"
+else
+    NCPUS="$(grep -c processor /proc/cpuinfo)"
+fi
+
+usage() {
+    echo >&2 "${0##*/} [options] [RULE..]"
+    echo >&2
+    echo >&2 "Options:"
+    echo >&2
+    echo >&2 "  -n    Dry run."
+    echo >&2 "  -v    Verbose."
+    echo >&2 "  -u    Update. Download even for sites we've already downloaded, to update them."
+    echo >&2 "  -P    Execute the mirror commands in parallel."
+    echo >&2 "  -c CATEGORIES      Include specific site categories by tool: ftp, wget, rsync, wayback."
+    echo >&2 "  -i INCLUDE_FILTER  Only process rules matching the specified regex filter."
+    echo >&2 "  -x EXCLUDE_FILTER  Don't process rules matching the specified regex filter."
+    echo >&2 "  -f RULES_FILE      Read rules from RULES_FILE, not cmdline or stdin."
+    exit 2
+}
+
+process_arguments() {
+    dry_run=
+    verbose=
+    update=
+    parallel=
+    include_categories=
+    include=
+    exclude=
+    rules_file=
+    while getopts nvuPc:i:x:f:h opt; do
+        case "$opt" in
+        n)
+            dry_run=1
+            verbose=1
+            ;;
+        v)
+            verbose=1
+            ;;
+        u)
+            update=1
+            ;;
+        P)
+            parallel=1
+            ;;
+        c)
+            include_categories="$OPTARG"
+            ;;
+        i)
+            include="$OPTARG"
+            ;;
+        x)
+            exclude="$OPTARG"
+            ;;
+        f)
+            rules_file="$OPTARG"
+            ;;
+        \? | h)
+            usage
+            ;;
+        esac
+    done
+}
+
+msg() {
+    fmt="$1"
+    # shellcheck disable=SC2059
+    printf "$fmt\n" "$@" >&2
+}
+
+die() {
+    msg "$@"
+    exit 1
+}
+
+has() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+printcmd() {
+    python3 -c 'import subprocess,sys; print(subprocess.list2cmdline(sys.argv[1:]))' "$@"
+}
+
+run() {
+    if [ -n "$verbose" ]; then
+        printf '❯ %s\n' "$(printcmd "$@")" >&2
+    fi
+    if [ -z "$dry_run" ]; then
+        command "$@"
+    fi
+}
+
+check_category() {
+    [ -z "$include_categories" ] || echo "$include_categories" | tr ',' ' ' | grep -qwF "$1"
+}
+
+mirror() {
+    while IFS=$'\t' read -r subdir line default_args; do
+        if [ -z "$subdir" ]; then
+            die "Invalid line: %s\t%s\t%s" "$subdir" "$line" "$default_args"
+        fi
+
+        if [ -z "$line" ]; then
+            line=${subdir#* }
+            subdir=${subdir%% *}
+        fi
+
+        echo "$line" | (
+            read -r category args
+
+            subdir=${subdir%/}
+            if [ -z "$subdir" ] || [ -z "$category" ]; then
+                die "Invalid line: $subdir $category $args"
+            fi
+
+            if check_category "$category"; then
+                # shellcheck disable=SC2086
+                printcmd "$category-mirror" -c "$subdir" ${default_args:+-a "$default_args"} ${update:+-u} -- | tr -d '\n'
+                echo " $args"
+            fi
+        )
+    done |
+        tr '\n' '\0' |
+        ifne xargs -o0 ${parallel:+-P $NCPUS} -I"{}" -- sh -c ". \"$scriptdir/scripts/common.sh\" && verbose=$verbose dry_run=$dry_run run {}"
+}
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+# shellcheck disable=SC2086
+if [ -n "$rules_file" ]; then
+    cat "$rules_file"
+elif [ $# -gt 0 ]; then
+    for arg; do
+        printf '%s\n' "$arg"
+    done
+fi |
+    grep -Ev '^#|^ *$' |
+    filter |
+    mirror

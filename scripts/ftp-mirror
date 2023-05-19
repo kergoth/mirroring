@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+LFTP_PRECMD="${LFTP_PRECMD:-set ftp:lang true; set ssl:check-hostname false; set ssl:verify-certificate false;}"
+LFTP_MIRROR_ARGS="${LFTP_MIRROR_ARGS:---use-pget-n=4 --parallel=8 -x '(^|/)(\\.)' --dereference --continue --skip-noaccess --use-cache}"
+
+usage() {
+    echo >&2 "${0##*/} [options] [ARGS..]"
+    echo >&2
+    echo >&2 "Options:"
+    echo >&2
+    echo >&2 "  -c DIRECTORY    Change to DIRECTORY before mirroring."
+    echo >&2 "  -a PRECMD        Change lftp options by specifying extra set commands."
+    exit 2
+}
+
+process_arguments() {
+    ARGS=
+    common_process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    LFTP_PRECMD="$LFTP_PRECMD $ARGS"
+
+    url=$1
+    shift
+    url_="${url#*://}"
+    domain="$(echo "$url_" | sed -e 's#/.*##')"
+    path="$(echo "$url_" | sed -e 's#^[^/]*##; s/%20/ /g;')"
+    destination=${1:-$domain$path}
+    destination=$(echo "$destination" | sed -e 's/%20/ /g')
+    if [ $# -gt 1 ]; then
+        shift
+    fi
+    args=$(printcmd "$@")
+}
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+if [ -e "$destination/.done" ] && [ -z "$update" ]; then
+   exit 0
+fi
+
+commandfile=$(mktemp -t "${0##*/}.XXXXXX")
+trap 'rm -f "$commandfile"' EXIT INT TERM
+
+if [ -n "$LFTP_PRECMD" ]; then
+    printf '%s\n' "$LFTP_PRECMD" >"$commandfile"
+fi
+printf 'open -B %s\n' "$url" >>"$commandfile"
+case "$url" in
+*/)
+    mkdir -p "$(dirname "$destination")"
+    printf 'mirror %s ./ "%s/"\n' "$args" "${destination%/}"
+    ;;
+*)
+    urlpath=$(basename "$url")
+    destdir=$(dirname "$destination")
+    mkdir -p "$destdir"
+    printf 'pget %s ./"%s" -o "%s"\n' "$args" "$urlpath" "$destination"
+    ;;
+esac >>"$commandfile"
+
+lftp -f "$commandfile"
+touch "$destination/.done"

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+PATH="$(cd "$(dirname "$0")" && pwd -P):$PATH"
+
+set -euo pipefail
+
+if [ $# -eq 0 ]; then
+    find . -type d -iname \*_IA
+else
+    for arg; do
+        printf '%s\n' "$arg"
+    done
+fi \
+    | tr '\n' '\0' \
+    | xargs -to0 -I"{}" first-to-last "{}_merged/" wayback-merge -iv "{}"

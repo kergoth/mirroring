@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+
+import click
+import json
+from pprint import pformat
+from pathlib import Path
+from enum import Enum, auto
+from dataclasses import dataclass
+
+def p(*args, **kwargs):
+    click.echo(tuple(pformat(a) if not isinstance(a, str) else a for a in args),
+                **kwargs)
+
+class FileType(Enum):
+    CD = auto()
+
+    def __str__(self):
+        return self.name
+
+class Architecture(Enum):
+    x86_32 = auto()
+
+    def __str__(self):
+        return self.name
+
+@dataclass
+class Download:
+    name: str
+    filetype: str
+    filename: Path
+    link: str
+    version: str
+    language: str
+    architecture: str
+    size: str
+
+def decode_name(column):
+    children = column['children']
+    assert(len(children) == 1 and children[0]['tag'] == 'a')
+    a = children[0]
+    a_children = a['children']
+    assert(len(a_children) == 1 and a_children[0]['tag'] == 'img')
+    img = a_children[0]
+    filetype = img['title']
+    return filetype, a['text'], a['title'], a['href']
+
+def decode_arch(column):
+    children = column['children']
+    for c in children:
+        if c['tag'] == 'img':
+            yield c['title'].replace('-', '_')
+
+def decode_size(column):
+    children = column['children']
+    assert(len(children) == 1 and children[0]['tag'] == 'span')
+    span = children[0]
+    return span['text']
+
+@click.command()
+@click.argument('jsonfile', type=click.File('r'))
+def cli(jsonfile):
+    d = json.loads(jsonfile.read())
+    if not d or not d[0] or not d[0]['children']:
+        return
+
+    for row in d[0]['children']:
+        row_columns = row['children']
+        filetype, name, filename, link = decode_name(row_columns[0])
+        version_column = row_columns[1]
+        version = version_column.get('text', '')
+        if version_column.get('children'):
+            version_tags = []
+            for c in version_column['children']:
+                if c['tag'] == 'span' and c.get('class') and c.get('text'):
+                    tag = [t for t in c['class'].split() if t.startswith('downloadTag')]
+                    version_tags.extend(t.replace('downloadTag', '') for t in tag)
+            version_tags = ', '.join(sorted(version_tags))
+        else:
+            version_tags = ''
+        language = row_columns[2]['text']
+        architecture = ", ".join(sorted(decode_arch(row_columns[3])))
+        size = decode_size(row_columns[4])
+        dl = (name, filetype, filename, link, version, version_tags, language,
+               architecture, size)
+        print('\t'.join(str(a) for a in dl))
+
+if __name__ == "__main__":
+    cli()

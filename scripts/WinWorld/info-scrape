@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+# TODO: fix handling of release notes, installation instructions, etc, these
+# are all just headings and paragraphs after the release selector, under
+# release information
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source=../common.sh
+. "$scriptdir/../common.sh"
+
+usage() {
+    cat >&2 <<END
+${0##*/} [options]
+
+Options:
+
+-u                      Update by re-fetching info for existing files.
+-v                      Verbose mode, show what's being done.
+-i INCLUDE_PATTERN  Regex pattern of downloads to include.
+-x EXCLUDE_PATTERN  Regex pattern of downloads to exclude.
+END
+    exit 2
+}
+
+msg() {
+    fmt="$1"
+    if [ $# -gt 1 ]; then
+        shift
+    fi
+    # shellcheck disable=SC2059
+    printf "$fmt\n" "$@" >&2
+}
+
+msg_verbose() {
+    if [ $verbose -ne 0 ]; then
+        msg "$@"
+    fi
+}
+
+die() {
+    msg_verbose "$@"
+    exit 1
+}
+
+has() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+printcmd() {
+    python3 -c 'import subprocess,sys; print(subprocess.list2cmdline(sys.argv[1:]))' "$@"
+}
+
+run() {
+    if [ $verbose -ne 0 ]; then
+        printf '❯ %s\n' "$(printcmd "$@")" >&2
+    fi
+    command "$@"
+}
+
+filter() {
+    if [ -n "$include" ]; then
+        grep -E "$include"
+    else
+        cat
+    fi |
+        if [ -n "$exclude" ]; then
+            grep -Ev "$exclude"
+        else
+            cat
+        fi
+}
+
+info_map() {
+    cat <<END
+product	div#descriptionColumn h1 text{}
+description	div#descriptionColumn > p text{}
+category	div#infoSheet dt:contains("Product type") + dd a.badge-primary text{}
+tags	div#infoSheet dt:contains("Product type") + dd a.badge-secondary text{}
+version	div#descriptionColumn h1 text{}
+screenshot_urls	div#releaseInformation div.active a img attr{src}	div#releaseInformation div.carousel-item a img attr{data-src}
+release_notes	div#releaseInformation div#screenshotPanel + h3 + p text{}
+vendor	div#infoSheet dt:contains("Vendor") + dd a text{}
+release_date	div#infoSheet dt:contains("Release date") + dd text{}
+minimum_cpu	div#infoSheet dt:contains("Minimum CPU") + dd text{}
+minimum_ram	div#infoSheet dt:contains("Minimum RAM") + dd text{}
+minimum_free_space	div#infoSheet dt:contains("Minimum free disk space") + dd text{}
+ui	div#infoSheet dt:contains("User interface") + dd text{}
+platforms	div#infoSheet dt:contains("Platform") + dd a text{}
+serials	div#serialSheet #serialsList li text{}
+END
+}
+
+selector() {
+    cat "$1" | pup --plain "$2"
+}
+
+abs_url() {
+    local root=$1
+    shift
+    for url; do
+        case "$url" in
+        *://*)
+            echo "$url"
+            ;;
+        *)
+            echo "$root/${url#/}"
+            ;;
+        esac
+    done
+}
+
+download_objects() {
+    local htmlfile=$1
+    selector "$htmlfile" "table#downloadsTable tbody json{}" >"$tmpdir/dl-json"
+    if ! [ -s "$tmpdir/dl-json" ]; then
+        return
+    fi
+    "$scriptdir"/downloads-info "$tmpdir/dl-json" >"$tmpdir/downloads-info"
+    if ! [ -s "$tmpdir/downloads-info" ]; then
+        return
+    fi
+
+    cat "$tmpdir/downloads-info" |
+        while read_tdf_line name filetype filename dl_url version version_tags language architecture size; do
+            dl_id=${dl_url#/download/}
+            dl_url=$(abs_url "$winworld" "$dl_url")
+            dlfile="./DownloadsInfo/$dl_id.html"
+            if ! [ -s "$dlfile" ]; then
+                msg "$dlfile is missing"
+                continue
+            fi
+
+            if [ -s "$dlfile" ]; then
+                pup a "attr{href}" <"$dlfile" |
+                    grep -E '/download/[^/]*/|cloudflare' |
+                    uniq-seen >"$tmpdir/download_urls" || {
+                    msg "failed to extract download links for $htmlfile - $name"
+                    return 1
+                }
+
+                ipfs_url=$(grep cloudflare "$tmpdir/download_urls" | sed -e 's#https://cloudflare-ipfs.com/#dweb:/#')
+                mirror_urls=$(grep -v cloudflare "$tmpdir/download_urls" | sort -u | while read -r url; do abs_url "$winworld" "$url"; done | jo -a)
+            else
+                ipfs_url=
+                mirror_urls=
+            fi
+
+            architecture=$(echo "$architecture" | sed -e "s/, /"$'\t'"/g" | tr '\t' '\n' | jo -a)
+            if [ -n "$version_tags" ]; then
+                version_tags=$(echo "$version_tags" | sed -e "s/, /"$'\t'"/g" | tr '\t' '\n' | jo -a)
+            fi
+            [ -n "$name" ] || {
+                msg "Download name not found in $htmlfile"
+                return 1
+            }
+            [ -n "$filetype" ] || {
+                msg "Download filetype not found in $htmlfile"
+                return 1
+            }
+            [ -n "$filename" ] || {
+                msg "Download filename not found in $htmlfile"
+                return 1
+            }
+            [ -n "$dl_url" ] || {
+                msg "Download dl_url not found in $htmlfile"
+                return 1
+            }
+            [ -n "$architecture" ] || {
+                msg "Download architecture not found in $htmlfile"
+                return 1
+            }
+            [ -n "$size" ] || {
+                msg "Download size not found in $htmlfile"
+                return 1
+            }
+            [ -n "$language" ] || {
+                msg "Download language not found in $htmlfile"
+                return 1
+            }
+            jo -- \
+                ${name:+-s} "name=${name:-null}" \
+                ${filetype:+-s} "filetype=${filetype:-null}" \
+                ${filename:+-s} "filename=${filename:-null}" \
+                ${dl_url:+-s} "url=${dl_url:-null}" \
+                ${ipfs_url:+-s "ipfs_url=$ipfs_url"} \
+                ${mirror_urls:+"mirror_urls=$mirror_urls"} \
+                ${version:+-s} "version=${version:-null}" \
+                ${version_tags:+"version_tags=$version_tags"} \
+                ${language:+-s} "language=${language:-null}" \
+                "architecture=$architecture" \
+                ${size:+-s} "size=${size:-null}"
+        done
+}
+
+main() {
+    find "./ProductInfo" -type f -iname \*.html |
+        sort -uf |
+        filter |
+        while read -r htmlfile; do
+            if ! [ -s "$htmlfile" ]; then
+                continue
+            fi
+
+            product_id=${htmlfile#./ProductInfo/}
+            product_id=${product_id%.html}
+            product_url="$winworld/product/$product_id"
+            jsonfile=${htmlfile%.html}.json
+            if [ -s "$jsonfile" ] && [ "$update" -eq 0 ]; then
+                continue
+            fi
+
+            echo "Scraping $product_id.."
+            info_map >"$tmpdir/info.map"
+            set --
+            while IFS=$'\t' read -r id selectors; do
+                echo "$selectors" | tr '\t' '\n' >"$tmpdir/selectors"
+                while read -r selector; do
+                    case "$id" in
+                    product)
+                        selector "$htmlfile" "$selector" | head -n 1 | sed -e 's/^ *//; s/ *$//'
+                        ;;
+                    version)
+                        selector "$htmlfile" "$selector" | tail -n +2 | sed -e 's/^ *//; s/ *$//'
+                        ;;
+                    *product_type)
+                        selector "$htmlfile" "$selector" | sort -f | tr '\n' ' ' | sed -e 's/^ *//; s/ *$//' | tr ' ' '\n'
+                        ;;
+                    screenshot_urls)
+                        selector "$htmlfile" "$selector" |
+                            sort -f |
+                            while read -r url; do
+                                abs_url "$winworld" "$url"
+                            done
+                        ;;
+                    *)
+                        selector "$htmlfile" "$selector"
+                        ;;
+                    esac >"$tmpdir/value"
+                    if [ -s "$tmpdir/value" ]; then
+                        case "$id" in
+                        screenshot_urls | serials | platforms | tags)
+                            cat "$tmpdir/value"
+                            ;;
+                        *product_type)
+                            cat "$tmpdir/value"
+                            echo
+                            ;;
+                        *)
+                            # shellcheck disable=SC2046
+                            if [ $(wc -l <"$tmpdir/value") -gt 1 ]; then
+                                mv "$tmpdir/value" "$tmpdir/$id"
+                                value="@$tmpdir/$id"
+                            else
+                                value="$(cat "$tmpdir/value")"
+                            fi
+                            if [ -n "$value" ]; then
+                                echo "$value"
+                            fi
+                            ;;
+                        esac
+                    fi
+                done <"$tmpdir/selectors" >"$tmpdir/values"
+                if [ -s "$tmpdir/values" ]; then
+                    case "$id" in
+                    screenshot_urls | serials | platforms | tags)
+                        array=1
+                        ;;
+                    *)
+                        # shellcheck disable=SC2046
+                        if [ $(wc -l <"$tmpdir/values") -gt 1 ]; then
+                            array=1
+                        else
+                            array=0
+                        fi
+                        ;;
+                    esac
+                    # shellcheck disable=SC2046
+                    if [ $array -eq 1 ]; then
+                        value=$(cat "$tmpdir/values" | tr '\n' '\0' | xargs -0 jo -a -- -s)
+                        set -- "$@" "$id=$value"
+                    else
+                        value="$(cat "$tmpdir/values" | tr -d '\n')"
+                        set -- "$@" -s "$id=$value"
+                    fi
+                    # msg_debug "$id=$(quote "$value")"
+                    eval "$id=$(quote "$value")"
+                fi
+            done <"$tmpdir/info.map"
+
+            if downloads="$(download_objects "$htmlfile" | jo -a)" && [ -n "$downloads" ]; then
+                set -- "$@" downloads="$downloads"
+
+                [ -n "${product:-}" ] || die "Product not found in $htmlfile"
+                [ -n "${product_url:-}" ] || die "Product URL not found in $htmlfile"
+                [ -n "${version:-}" ] || die "Product version not found in $htmlfile"
+                [ -n "${category:-}" ] || die "Product category not found in $htmlfile"
+
+                jo -p -- product_url="$product_url" "$@" >./ProductInfo/"$product_id.json"
+            else
+                msg "No downloads found for $product_id, removing json"
+                rm -f ./ProductInfo/"$product_id.json"
+            fi
+        done
+}
+
+winworld=https://winworldpc.com
+tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+trap 'rm -rf "$tmpdir"' EXIT INT TERM
+htmlfile="$tmpdir/htmlfile"
+
+update=0
+verbose=0
+include=
+exclude=
+while getopts uvi:x:h opt; do
+    case "$opt" in
+    u)
+        update=1
+        ;;
+    v)
+        verbose=1
+        ;;
+    i)
+        include="$OPTARG"
+        ;;
+    x)
+        exclude="$OPTARG"
+        ;;
+    \? | h)
+        usage
+        ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+main "$@"

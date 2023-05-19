@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+
+quote(){
+    sed -e "s,','\\\\'',g; 1s,^,',; \$s,\$,',;" << EOF
+$1
+EOF
+}
+
+save () {
+    case "$1" in
+    # when a string contains a "'" we have to escape it
+    *\'*)
+        saved="$saved $(quote "$1")"
+        ;;
+    # otherwise just quote the variable
+    *)
+        saved="$saved '$1'"
+        ;;
+    esac
+}
+
+evalf () {
+    fmt="$1"
+    shift
+    printf >&2 "evalf: $fmt\n" "$@"
+    eval echo >&2 "evalf: $(printf "$fmt" "$@")"
+    # shellcheck disable=SC2049
+    eval "$(printf "$fmt" "$@")"
+}
+
+PATH="$(cd "$(dirname "$0")" && pwd -P):$PATH"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -*)
+            save "$1"
+            ;;
+        *)
+            break
+            ;;
+    esac
+    shift || break
+done
+
+dest="$(eval "echo \"\$$#\"")"
+
+tmpfile=$(mktemp -t "${0##*/}.XXXXXX")
+trap 'rm -f "$tmpfile"' EXIT INT TERM
+
+while [ $# -gt 1 ]; do
+    printf '%s\n' "$1"
+    shift
+done >"$tmpfile"
+eval set -- "$saved"
+
+cat "$tmpfile" \
+    | tr '\n' '\0' \
+    | xargs -0 -I"{}" find "{}" -mindepth 1 -maxdepth 1 -type d \
+    | sed -e 's#$#/.#' \
+    | archive-cp "$@" -f - "$dest/"
