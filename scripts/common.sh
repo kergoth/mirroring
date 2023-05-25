@@ -49,18 +49,23 @@ filter() {
         grep -E "$include"
     else
         cat
-    fi |
-        if [ -n "$exclude" ]; then
+    fi \
+        | if [ -n "$exclude" ]; then
             grep -Ev "$exclude"
         else
             cat
         fi
 }
 
-quote(){
-    sed -e "s,','\\\\'',g; 1s,^,',; \$s,\$,',;" << EOF
+quote() {
+    sed -e "s,','\\\\'',g; 1s,^,',; \$s,\$,',;" <<EOF
 $1
 EOF
+}
+
+echo_tsv() {
+    local IFS=$'\t'
+    echo "$*"
 }
 
 # Via https://stackoverflow.com/a/4622512
@@ -70,16 +75,16 @@ read_tdf_line() {
     old_ifs="${IFS:-${default_ifs}}"
     IFS=$'\n'
 
-    if ! read -r line ; then
+    if ! read -r line; then
         return 1
     fi
     at_end=0
     while read -r element; do
-        if (( $# > 1 )); then
+        if (($# > 1)); then
             printf -v "$1" '%s' "$element"
             shift
         else
-            if (( at_end )) ; then
+            if ((at_end)); then
                 # replicate read behavior of assigning all excess content
                 # to the last variable given on the command line
                 printf -v "$1" '%s\t%s' "${!1}" "$element"
@@ -92,8 +97,8 @@ read_tdf_line() {
 
     # if other arguments exist on the end of the line after all
     # input has been eaten, they need to be blanked
-    if ! (( at_end )) ; then
-        while (( $# )) ; do
+    if ! ((at_end)); then
+        while (($#)); do
             printf -v "$1" '%s' ''
             shift
         done
@@ -118,7 +123,7 @@ abs_readlink() {
     done
 }
 
-mcd () {
+mcd() {
     # shellcheck disable=SC2164
     mkdir -p "$1" && cd "$1"
 }
@@ -134,7 +139,7 @@ common_usage() {
     exit 2
 }
 
-usage () {
+usage() {
     common_usage
 }
 
@@ -143,18 +148,18 @@ common_process_arguments() {
     directory=
     while getopts uc:a:h opt; do
         case "$opt" in
-        u)
-            update=1
-            ;;
-        c)
-            directory="$OPTARG"
-            ;;
-        a)
-            ARGS="$OPTARG"
-            ;;
-        \? | h)
-            usage
-            ;;
+            u)
+                update=1
+                ;;
+            c)
+                directory="$OPTARG"
+                ;;
+            a)
+                ARGS="$OPTARG"
+                ;;
+            \? | h)
+                usage
+                ;;
         esac
     done
     shift $((OPTIND - 1))
