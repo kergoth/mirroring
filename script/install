@@ -3,6 +3,23 @@
 set -euo pipefail
 
 cd "$(dirname "$0")" && cd ..
+
 nix-shell --run true
+
 gem install specific_install
 gem specific_install https://github.com/davidrg/wayback-machine-downloader
+
+if command -v pipx &>/dev/null; then
+    pipx install unshortenit
+else
+    user=
+    if [ -z "$VIRTUAL_ENV" ]; then
+        case "$(command -v pip 2>/dev/null)" in
+            /nix/*) ;;
+            *)
+                user=--user
+                ;;
+        esac
+    fi
+    pip ${user:+$user} install unshortenit
+fi
