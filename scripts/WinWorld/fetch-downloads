@@ -107,7 +107,8 @@ downloads() {
 }
 
 fetch_downloads() {
-    skip_mirror=0
+    local ret=0
+    local skip_mirror=0
 
     # shellcheck disable=SC2016,SC2154
     downloads |
@@ -218,9 +219,9 @@ fetch_downloads() {
                         break
                     fi
                 done
-            fi
-            if [ -e "$dest" ]; then
-                continue
+                if [ -e "$dest" ]; then
+                    continue
+                fi
             fi
 
             if [ -z "$ipfs_url" ] && [ -z "$mirror_urls" ]; then
@@ -250,12 +251,12 @@ fetch_downloads() {
                     msg_verbose "Skipping further mirror fetches"
                     skip_mirror=1
                     if [ $fetch_ipfs -eq 0 ]; then
+                        ret=1
                         return
                     fi
+                else
+                    continue
                 fi
-            fi
-            if [ -e "$dest" ]; then
-                continue
             fi
 
             if [ $fetch_ipfs -eq 1 ] && [ -n "$ipfs_url" ]; then
@@ -267,6 +268,7 @@ fetch_downloads() {
                     {
                         rm -f "$dest.new"
                         msg "Fetch of %s via ipfs failed" "$dl_name"
+                        ret=1
                         continue
                     }
 
@@ -274,11 +276,17 @@ fetch_downloads() {
                     run mv "$dest.new" "$dest"
                 else
                     rm -f "$dest.new"
+                    ret=1
+                    continue
                 fi
             elif [ -z "$ipfs_url" ]; then
                 msg_debug "Unable to fetch %s via ipfs, no ipfs url" "$dl_name"
+                ret=1
+            else
+                ret=1
             fi
-        done
+        done || ret=1
+    return $ret
 }
 
 sort_downloads() {
