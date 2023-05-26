@@ -238,7 +238,11 @@ fetch_downloads() {
                         if [ -z "$dry_run" ] && download_mirror "$mirror_url" "$tmpdir"; then
                             tmpfile=$(cd "$tmpdir" && find . -type f | cut -d/ -f2- | head -n 1)
                             if [ "$dl_name" != "$tmpfile" ]; then
-                                printf '%s\t%s\n' "$dl_name" "$tmpfile" >>paths.txt
+                                case "$tmpfile" in
+                                */*)
+                                    printf '%s\t%s\n' "$dl_name" "$tmpfile" >>paths.txt
+                                    ;;
+                                esac
                             fi
                             run mv "$tmpdir/$tmpfile" "$dest"
                             break
