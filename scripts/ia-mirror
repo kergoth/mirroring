@@ -10,15 +10,18 @@ scriptdir=$(cd "$(dirname "$0")" && pwd)
 process_arguments "$@"
 shift $((OPTIND - 1))
 
+identifier=$1
+shift
+
 if [ -n "$directory" ]; then
     mkdir -p "$directory"
     cd "$directory"
 fi
 
-if [ -e .done ] && [ -z "$update" ]; then
+if [ -e "$identifier/.done" ] && [ -z "$update" ]; then
     exit 0
 fi
 
-ia download "$@"
+ia download "$identifier" "$@"
 
-touch .done
+touch "$identifier/.done"
