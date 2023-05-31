@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+usage() {
+    echo >&2 "${0##*/} [options] [ARGS..]"
+    echo >&2
+    echo >&2 "Options:"
+    echo >&2
+    echo >&2 "  -c DIRECTORY    Change to DIRECTORY before mirroring."
+    echo >&2 "  -a PRECMD        Change lftp options by specifying extra set commands."
+    exit 2
+}
+
+process_arguments() {
+    ARGS=
+    common_process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    ORIG_OPTIND=$OPTIND
+    OPTIND=0
+    verbose=
+    output=
+    is_folder=
+    while getopts vfo:h opt; do
+        case "$opt" in
+        v)
+            verbose=1
+            ;;
+        f)
+            is_folder=1
+            ;;
+        o)
+            output="$OPTARG"
+            ;;
+        \? | h)
+            usage
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    OPTIND=$((OPTIND + ORIG_OPTIND - 1))
+
+    if [ -n "$is_folder" ] && [ -z "$output" ]; then
+        output=.
+    fi
+}
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+if [ -n "$is_folder" ] ; then
+    if [ -n "$output" ]; then
+        donestamp="$output/.done"
+    fi
+else
+    if [ -n "$output" ]; then
+        donestamp="$output.done"
+    else
+        donestamp=.done
+    fi
+fi
+
+if [ -e "$donestamp" ] && [ -z "$update" ]; then
+    exit 0
+fi
+
+gdown ${is_folder:+--folder} ${output:+-O "$output"} "$@"
+
+touch "$donestamp"
