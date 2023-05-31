@@ -7,21 +7,53 @@ scriptdir=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=./common.sh
 . "$scriptdir/common.sh"
 
+process_arguments() {
+    ARGS=${IA_ARGS:-}
+    common_process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    ORIG_OPTIND=$OPTIND
+    OPTIND=0
+    verbose=
+    destdir=
+    while getopts vd:h opt; do
+        case "$opt" in
+        v)
+            verbose=1
+            ;;
+        d)
+            destdir="$OPTARG"
+            ;;
+        \? | h)
+            usage
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    OPTIND=$((OPTIND + ORIG_OPTIND - 1))
+}
+
 process_arguments "$@"
 shift $((OPTIND - 1))
 
 identifier=$1
 shift
 
+if [ -z "$destdir" ]; then
+    destdir="$identifier"
+fi
+
 if [ -n "$directory" ]; then
     mkdir -p "$directory"
     cd "$directory"
 fi
 
-if [ -e "$identifier/.done" ] && [ -z "$update" ]; then
+if [ -e "$destdir/.done" ] && [ -z "$update" ]; then
     exit 0
 fi
 
-ia download "$identifier" "$@"
+mkdir -p "$destdir"
+ia download "$identifier" --no-directories --destdir="$destdir" ${ARGS:+$ARGS} "$@"
 
-touch "$identifier/.done"
+touch "$destdir/.done"
