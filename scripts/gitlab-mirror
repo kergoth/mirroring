@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-
 set -euo pipefail
 
 scriptdir=$(cd "$(dirname "$0")" && pwd)
@@ -52,4 +51,4 @@ glab release list |
         ) || rm -rf "releases/$version"
     done
 
-touch "$dest/.done"
+touch .done
