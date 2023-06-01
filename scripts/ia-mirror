@@ -16,13 +16,17 @@ process_arguments() {
     OPTIND=0
     verbose=
     destdir=
-    while getopts vd:h opt; do
+    search=
+    while getopts vd:s:h opt; do
         case "$opt" in
         v)
             verbose=1
             ;;
         d)
             destdir="$OPTARG"
+            ;;
+        s)
+            search="$OPTARG"
             ;;
         \? | h)
             usage
@@ -37,11 +41,17 @@ process_arguments() {
 process_arguments "$@"
 shift $((OPTIND - 1))
 
-identifier=$1
-shift
-
-if [ -z "$destdir" ]; then
-    destdir="$identifier"
+if [ -z "$search" ]; then
+    identifier=$1
+    shift
+    if [ -z "$destdir" ]; then
+        destdir="$identifier"
+    fi
+else
+    identifier=
+    if [ -z "$destdir" ]; then
+        destdir=.
+    fi
 fi
 
 if [ -n "$directory" ]; then
@@ -54,6 +64,6 @@ if [ -e "$destdir/.done" ] && [ -z "$update" ]; then
 fi
 
 mkdir -p "$destdir"
-ia download "$identifier" --no-directories --destdir="$destdir" ${ARGS:+$ARGS} "$@"
+ia download ${identifier:+"$identifier"} --no-directories --destdir="$destdir" ${search:+--search=$search} ${ARGS:+$ARGS} "$@"
 
 touch "$destdir/.done"
