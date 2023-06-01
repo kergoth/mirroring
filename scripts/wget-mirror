@@ -10,17 +10,27 @@ scriptdir=$(cd "$(dirname "$0")" && pwd)
 . "$scriptdir/common.sh"
 
 url_dest() {
-    local url=$1
+    local url
+    url=$(urldecode "$1")
     dest="${url#*://}"
     case "$dest" in
-        */) ;;
-        *)
-            dest="$(dirname "$dest")"
-            ;;
+    */) ;;
+    *)
+        dest="$(dirname "$dest")"
+        ;;
     esac
     echo "$dest"
 }
 
+urldecode() {
+    python3 -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$1"
+}
+
+unfurl_dest() {
+    unfurl json | jq -r '.domain + "/" + .path'
+}
+
+ARGS="$WGET_ARGS"
 process_arguments "$@"
 shift $((OPTIND - 1))
 
@@ -29,7 +39,21 @@ if [ $# -lt 1 ]; then
 fi
 url=$1
 shift
-dest=$(url_dest "$url")
+
+case "$url" in
+*/)
+    adjusted="$url"
+    ;;
+*)
+    adjusted="$(dirname "$url")"
+    ;;
+esac
+
+if has unfurl; then
+    dest="$(echo "$adjusted" | unfurl_dest)"
+else
+    dest="$(url_dest "${adjusted%/}/")"
+fi
 
 if [ -n "$directory" ]; then
     mkdir -p "$directory"
@@ -41,6 +65,6 @@ if [ -e "$dest/.done" ] && [ -z "$update" ]; then
 fi
 
 # shellcheck disable=SC2086
-wget ${ARGS:-$WGET_ARGS} "$@" "$url"
+wget ${ARGS:+$ARGS} "$@" "$url"
 
 touch "$dest/.done"
