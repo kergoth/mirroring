@@ -106,6 +106,142 @@ downloads() {
         xargs -0 jq -r '. as { product: $product, version: $version, category: $category, platforms: $platforms } | .downloads[] | [ $product, $version, $category, ( if $platforms then $platforms | join(", ") else "" end ), .name, if .version then .version else "" end, ( if .version_tags then .version_tags | join(", ") else "" end ), .language, .filename, .ipfs_url, (if .mirror_urls then .mirror_urls | join("\t") else "" end ) ] | flatten | join("\t")'
 }
 
+# list_downloads() {
+#     # shellcheck disable=SC2154
+#     downloads |
+#         filter |
+#         sort_downloads |
+#         while read_tdf_line product version category platforms dl_name dl_version version_tags language filename ipfs_url mirror_urls; do
+#             if [ -z "$filename" ]; then
+#                 die "No filename for $product $version - $dl_name"
+#             fi
+#             if [ -z "$ipfs_url" ] && [ -z "$mirror_urls" ]; then
+#                 msg "Skipping %s, no urls found" "$filename"
+#                 continue
+#             fi
+
+#             case "$product" in
+#             "AIX")
+#                 platforms="Unix"
+#                 ;;
+#             "Davong Hard Disk Controller Drivers")
+#                 platforms="DOS"
+#                 ;;
+#             "LapLink")
+#                 if [ "$version" = "XL" ]; then
+#                     platforms="DOS"
+#                 fi
+#                 ;;
+#             "Microsoft Works")
+#                 if [ "$version" = "2.x (Mac)" ]; then
+#                     platforms="MacOS"
+#                 fi
+#                 ;;
+#             "Omniview")
+#                 platforms="DOS"
+#                 ;;
+#             "Schedule+")
+#                 if [ "$version" = "95 (7.0)" ]; then
+#                     platforms="Windows"
+#                 fi
+#                 ;;
+#             "Tandy Deskmate")
+#                 if [ "$version" = "DeskMate II" ]; then
+#                     platforms="DOS"
+#                 fi
+#                 ;;
+#             esac
+
+#             if echo "$platforms" | grep -q ","; then
+#                 # Multi-Platform
+#                 case "$dl_name" in
+#                 *for\ *\ and*) ;;
+#                 *\ for\ CPM*)
+#                     platforms=CPM
+#                     ;;
+#                 *\ for\ DOS* | *\ for\ PC\ DOS*)
+#                     platforms=DOS
+#                     ;;
+#                 *\ for\ Linux*)
+#                     platforms=Linux
+#                     ;;
+#                 *\ for\ Mac* | *\ for\ Classic\ Mac* | *PowerMac*)
+#                     platforms=MacOS
+#                     ;;
+#                 *\ for\ OS2*)
+#                     platforms=OS2
+#                     ;;
+#                 *\ for\ Unix* | *IRIX* | *Xenix* | *HP-UX*)
+#                     platforms=Unix
+#                     ;;
+#                 *\ for\ Windows*)
+#                     platforms=Windows
+#                     ;;
+#                 esac
+#             fi
+
+#             destfn="$(dl_destination "$filename" "$product" "$category" "$platforms" "$language" "$version_tags")"
+#             dest="$outdir/$destfn"
+
+#             if [ -s "$dest" ] && ! [ -L "$dest" ]; then
+#                 msg_debug "Skipping %s, already exists" "$dest"
+#                 continue
+#             fi
+#             echo_tsv "$filename" "$dl_name" "$destfn" "$ipfs_url" "$mirror_urls"
+#         done
+# }
+
+# existing_downloads() {
+#     :
+# }
+
+# fetch_downloads_2() {
+#     list_downloads >"$tmpfile"
+#     cat "$tmpfile" |
+#         while read_tdf_line filename dl_name destfn ipfs_url mirror_urls; do
+#             dest="$outdir/$destfn"
+
+#             if [ -L "$dest" ]; then
+#                 rm -f "$dest"
+#             fi
+
+#             for existing in "$outdir/$filename" "$outdir/$dl_name.7z"; do
+#                 if [ -e "$existing" ]; then
+#                     while [ -L "$existing" ]; do
+#                         existing=$(abs_readlink "$existing")
+#                     done
+
+#                     msg "$existing -> $dest"
+#                     mkdir -p "$(dirname "$dest")"
+#                     run mv -v "$existing" "$dest"
+#                     break
+#                 fi
+#             done
+#             if [ -e "$dest" ]; then
+#                 continue
+#             fi
+
+#             if [ -n "$copy_from" ]; then
+#                 for existing in "$filename" "$dl_name.7z" "$destfn"; do
+#                     src="$copy_from/$existing"
+#                     if [ -e "$src" ]; then
+#                         while [ -L "$src" ]; do
+#                             src=$(abs_readlink "$src")
+#                         done
+#                         msg "Copying %s from local mirror" "$existing"
+#                         # FIXME: assuming hard linking works
+#                         mkdir -p "$(dirname "$dest")"
+#                         run cp -alv "$src" "$dest" 2>/dev/null || run cp -av "$src" "$dest"
+#                         break
+#                     fi
+#                 done
+#                 if [ -e "$dest" ]; then
+#                     continue
+#                 fi
+#             fi
+#         done
+# }
+
 fetch_downloads() {
     local ret=0
     local skip_mirror=0
@@ -252,11 +388,12 @@ fetch_downloads() {
                     done
 
                 if ! [ -e "$dest" ]; then
-                    msg_verbose "Skipping further mirror fetches"
-                    skip_mirror=1
                     if [ $fetch_ipfs -eq 0 ]; then
                         ret=1
                         return
+                    else
+                        msg_verbose "Skipping further mirror fetches"
+                        skip_mirror=1
                     fi
                 else
                     continue
