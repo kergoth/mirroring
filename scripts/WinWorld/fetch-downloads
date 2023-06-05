@@ -402,8 +402,9 @@ fetch_downloads() {
 
             if [ $fetch_ipfs -eq 1 ]; then
                 if [ -z "$ipfs_url" ]; then
-                    msg "Unable to fetch %s via ipfs, no ipfs url" "$dl_name"
+                    msg_debug "Unable to fetch %s via ipfs, no ipfs url" "$dl_name"
                     ret=1
+                    continue
                 fi
 
                 mkdir -p "$(dirname "$dest")"
