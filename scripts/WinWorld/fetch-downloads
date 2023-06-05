@@ -370,7 +370,7 @@ fetch_downloads() {
                 echo "$mirror_urls" |
                     tr '\t' '\n' |
                     while read -r mirror_url; do
-                        msg "Fetching %s via %s" "$dl_name" "$mirror_url"
+                        msg "Fetching %s via mirror (%s)" "$dl_name" "$mirror_url"
                         if [ -z "$dry_run" ] && download_mirror "$mirror_url" "$tmpdir"; then
                             tmpfile=$(cd "$tmpdir" && find . -type f | cut -d/ -f2- | head -n 1)
                             if [ "$dl_name" != "$tmpfile" ]; then
@@ -400,31 +400,33 @@ fetch_downloads() {
                 fi
             fi
 
-            if [ $fetch_ipfs -eq 1 ] && [ -n "$ipfs_url" ]; then
+            if [ $fetch_ipfs -eq 1 ]; then
+                if [ -z "$ipfs_url" ]; then
+                    msg "Unable to fetch %s via ipfs, no ipfs url" "$dl_name"
+                    ret=1
+                fi
+
                 mkdir -p "$(dirname "$dest")"
-                msg "Fetching %s via ipfs" "$dl_name"
+                msg "Fetching %s via ipfs (%s)" "$dl_name" "$ipfs_url"
                 ipfs=${ipfs_url#dweb:/ipfs/}
                 ipfs=${ipfs%/*}
-                run ipfs ${ipfs_timeout:+--timeout "$ipfs_timeout"} get --progress --output="$dest.new" "$ipfs/$filename" ||
+                if has ipget; then
+                    run ipget -o "$dest.new" "$ipfs/$filename"
+                else
+                    run ipfs ${ipfs_timeout:+--timeout "$ipfs_timeout"} get --progress --output="$dest.new" "$ipfs/$filename"
+                fi ||
                     {
                         rm -f "$dest.new"
-                        msg "Fetch of %s via ipfs failed" "$dl_name"
+                        msg "Fetch of %s via ipfs %s failed" "$dl_name" "$ipfs_url"
                         ret=1
                         continue
                     }
 
-                if [ -e "$dest.new" ]; then
-                    run mv "$dest.new" "$dest"
-                else
-                    rm -f "$dest.new"
-                    ret=1
-                    continue
+                if ! [ -e "$dest.new" ]; then
+                    die "ipfs succeeded for $dl_name but $dest.new does not exist"
                 fi
-            elif [ -z "$ipfs_url" ]; then
-                msg_debug "Unable to fetch %s via ipfs, no ipfs url" "$dl_name"
-                ret=1
-            else
-                ret=1
+
+                run mv "$dest.new" "$dest"
             fi
         done || ret=1
     return $ret
