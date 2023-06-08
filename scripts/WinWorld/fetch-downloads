@@ -365,8 +365,11 @@ fetch_downloads() {
                 continue
             fi
 
-            if [ $fetch_mirrors -eq 1 ] && [ "$skip_mirror" -eq 0 ] && [ -n "$mirror_urls" ]; then
+            if [ -z "$dry_run" ]; then
                 mkdir -p "$(dirname "$dest")"
+            fi
+
+            if [ $fetch_mirrors -eq 1 ] && [ "$skip_mirror" -eq 0 ] && [ -n "$mirror_urls" ]; then
                 echo "$mirror_urls" |
                     tr '\t' '\n' |
                     while read -r mirror_url; do
@@ -407,7 +410,6 @@ fetch_downloads() {
                     continue
                 fi
 
-                mkdir -p "$(dirname "$dest")"
                 msg "Fetching %s via ipfs (%s)" "$dl_name" "$ipfs_url"
                 ipfs=${ipfs_url#dweb:/ipfs/}
                 ipfs=${ipfs%/*}
