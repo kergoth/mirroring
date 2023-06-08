@@ -1,7 +1,9 @@
 { pkgs ? import <nixpkgs> {} }:
   pkgs.mkShell {
     nativeBuildInputs = [
-        (pkgs.python310.withPackages (ps: with ps; [ pip click gdown ]))
+        (pkgs.python310.withPackages (ps: with ps; [ pip click ]))
+        pkgs.python310Packages.gdown
+        pkgs.python310Packages.internetarchive
         pkgs.fclones
         pkgs.gh
         pkgs.git
