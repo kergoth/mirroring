@@ -49,8 +49,8 @@ filter() {
         grep -E "$include"
     else
         cat
-    fi \
-        | if [ -n "$exclude" ]; then
+    fi |
+        if [ -n "$exclude" ]; then
             grep -Ev "$exclude"
         else
             cat
@@ -148,18 +148,18 @@ common_process_arguments() {
     directory=
     while getopts uc:a:h opt; do
         case "$opt" in
-            u)
-                update=1
-                ;;
-            c)
-                directory="$OPTARG"
-                ;;
-            a)
-                ARGS="$OPTARG"
-                ;;
-            \? | h)
-                usage
-                ;;
+        u)
+            update=1
+            ;;
+        c)
+            directory="$OPTARG"
+            ;;
+        a)
+            ARGS="$OPTARG"
+            ;;
+        \? | h)
+            usage
+            ;;
         esac
     done
     shift $((OPTIND - 1))

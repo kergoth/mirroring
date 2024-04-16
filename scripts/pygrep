@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+
+import argparse
+import sys
+import re
+
+
+def main():
+    parser = argparse.ArgumentParser(description="A replacement for grep.")
+    parser.add_argument("-i", "--ignore-case",
+                        action="store_true", help="ignore case distinctions")
+    parser.add_argument("-v", "--invert-match",
+                        action="store_true", help="select non-matching lines")
+    parser.add_argument("-d", "--delimiter", default="\t", action="store",
+                        help="specify a column delimiter for use with -f (default: tab character)")
+    parser.add_argument("-f", "--fields", action="store",
+                        help="specify column number")
+    parser.add_argument("pattern", type=str, help="the pattern to search for")
+    args = parser.parse_args()
+
+    if args.ignore_case:
+        flags = re.IGNORECASE
+    else:
+        flags = 0
+
+    regex = re.compile(args.pattern, flags)
+    for line in sys.stdin:
+        if args.fields:
+            tomatch = line.split(args.delimiter)[int(args.fields)-1]
+        else:
+            tomatch = line
+
+        matched = regex.search(tomatch)
+        if args.invert_match:
+            matched = not matched
+        if matched:
+            sys.stdout.write(line)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-quote(){
-    sed -e "s,','\\\\'',g; 1s,^,',; \$s,\$,',;" << EOF
+quote(){ sed -e "s,','\\\\'',g; 1s,^,',; \$s,\$,',;" << EOF
 $1
 EOF
 }

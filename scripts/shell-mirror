@@ -15,5 +15,8 @@ if [ -n "$directory" ]; then
     cd "$directory"
 fi
 
+export ARG_VERBOSE="$verbose"
+export ARG_UPDATE="$update"
+
 # Main
 "$@"

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#
+# Given a url or domain, gather all versions of this page or pages from
+# the wayback machine, then parse those html files to gather up additional
+# links to pull from the wayback machine, recursively.
+# Specify the URL or domain
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd -P)
+
+usage() {
+    echo >&2 "${0##*/} [options] LINK [LINK..]"
+    exit 2
+}
+
+msg() {
+    fmt="$1"
+    if [ $# -gt 1 ]; then
+        shift
+    fi
+    # shellcheck disable=SC2059
+    printf "$fmt\n" "$@" >&2
+}
+
+msg_verbose() {
+    if [ "${verbose:-0}" -ge "1" ]; then
+        msg "$@"
+    fi
+}
+
+verbose=0
+detail=
+pup_args=
+while getopts vdp:h opt; do
+    case "$opt" in
+    v)
+        verbose=$((verbose + 1))
+        ;;
+    d)
+        detail=1
+        ;;
+    p)
+        pup_args="$OPTARG"
+        ;;
+    \? | h)
+        usage
+        ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+trap 'rm -rf "$tmpdir"' EXIT INT TERM
+
+for url; do
+    msg_verbose "Downloading $url"
+    wayback_machine_downloader -d "$tmpdir" -s -p 150000 -e "$url" |
+        if [ $verbose -ge 1 ]; then
+            cat >&2
+        else
+            cat >/dev/null
+        fi
+    msg_verbose "Gathering links from downloaded versions of $url"
+    find "$tmpdir" -type f -not -name .DS_Store -not -name ._\* -print0 |
+        xargs -0 file --mime-type |
+        grep -E ': (text/html|application/xhtml\+xml)$' |
+        cut -d: -f1 |
+        tr '\n' '\0' |
+        xargs -0 cat |
+        pup-links ${detail:+-d} "$url" $pup_args |
+        uniq-seen
+done

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd -P)
+PATH="$scriptdir:$PATH"
+
+usage() {
+    echo >&2 "${0##*/} PATH [PATH..]"
+    exit 2
+}
+
+update_exit() {
+    update_dates "$@" \
+        || {
+            ret=$?
+            if [ $continue -eq 0 ]; then
+                exit $ret
+            fi
+        }
+}
+
+update_dates() {
+    for filepath; do
+        date_seconds=$(memberdate "$filepath" 2>/dev/null)
+        if [ -z "$date_seconds" ] || [ "$date_seconds" = null ] || [ "$date_seconds" = 0 ]; then
+            return 1
+        fi
+
+        set --
+        # shellcheck disable=SC2034
+        for i in $(seq 1 $verbose); do
+            set -- -v "$@"
+        done
+        setfiledate -o ${dry_run:+-n} "$@" "$date_seconds" "$filepath" || {
+            local fret=$?
+            if [ $continue -eq 0 ]; then
+                return $fret
+            fi
+        }
+    done
+}
+
+memberdate() {
+    lsar -nr -j "$1" \
+        | jq '[.lsarContents[].XADLastModificationDate | strptime("%Y-%m-%d %H:%M:%S") | strftime("%s") | tonumber] | sort | reverse | .[0]'
+}
+
+dry_run=
+continue=0
+verbose=0
+while getopts nkvh opt; do
+    case "$opt" in
+        n)
+            dry_run=1
+            ;;
+        k)
+            continue=1
+            ;;
+        v)
+            verbose=$((verbose + 1))
+            ;;
+        \? | h)
+            usage
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+ret=0
+for arg; do
+    if [ -d "$arg" ]; then
+        find "$arg/" -type f \
+            | while read -r filepath; do
+                update_exit "$filepath"
+            done
+    else
+        update_exit "$arg"
+    fi
+done
+exit $ret

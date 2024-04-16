@@ -2,14 +2,13 @@
 
 set -euo pipefail
 
-WINWORLD_FETCH_ARGS="${WINWORLD_FETCH_ARGS:--r -t 15m}"
+WINWORLD_FETCH_ARGS="${WINWORLD_FETCH_ARGS--t 15m}"
 
 scriptdir=$(cd "$(dirname "$0")" && pwd)
 PATH="$scriptdir/WinWorld:$scriptdir:$PATH"
 
 # shellcheck source=./common.sh
 . "$scriptdir/common.sh"
-
 usage() {
     cat >&2 <<END
 ${0##*/} [options] [ARGS..]"
@@ -78,19 +77,19 @@ fi
 
 if [ -n "$update" ] || ! [ -e ./ProductInfo/.done ]; then
     msg "Fetching WinWorld product pages for scraping metadata"
-    run fetch-products
-    touch ProductInfo/.done
+    run fetch-products && \
+        touch ProductInfo/.done
 fi
 
 if [ -n "$update" ] || ! [ -e ./DownloadsInfo/.done ]; then
     msg "Fetching WinWorld download pages for scraping download urls"
-    run fetch-download-pages
-    touch DownloadsInfo/.done
+    run fetch-download-pages && \
+        touch DownloadsInfo/.done
 fi
 
 if [ -n "$update" ] || ! [ -e ./ProductInfo/.json.done ]; then
     msg "Scraping downloaded WinWorld product and download pages"
-    run info-scrape ${verbose:+-v} ${include:+-i "$include"} ${exclude:+-x "$exclude"}
+    run info-scrape ${verbose:+-v} ${include:+-i "$include"} ${exclude:+-x "$exclude"} && \
     if [ -z "$include" ]; then
         touch ./ProductInfo/.json.done
     fi

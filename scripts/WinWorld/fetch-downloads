@@ -39,62 +39,62 @@ process_arguments() {
     outdir=.
     infodir=./ProductInfo
     include=
-    exclude=
+    exclude="fdef3da3-5814-11eb-b764-0200008a0da4/from/c3ae6ee2-8099-713d-3411-c3a6e280947e"
     ipfs_timeout=
     copy_from=
     testmode=0
     while getopts nvsrIMo:i:d:x:t:c:Th opt; do
         case "$opt" in
-        n)
-            dry_run=1
-            ;;
-        v)
-            verbose=$((verbose + 1))
-            ;;
-        s)
-            sorted=1
-            random=0
-            ;;
-        r)
-            random=1
-            sorted=0
-            ;;
-        I)
-            fetch_ipfs=0
-            ;;
-        M)
-            fetch_mirrors=0
-            ;;
-        o)
-            outdir="$OPTARG"
-            ;;
-        d)
-            infodir="$OPTARG"
-            if ! [ -d "$infodir" ]; then
-                die "INFODIR '%s' does not exist" "$infodir"
-            fi
-            ;;
-        i)
-            include="$OPTARG"
-            ;;
-        x)
-            exclude="$OPTARG"
-            ;;
-        t)
-            ipfs_timeout="$OPTARG"
-            ;;
-        c)
-            copy_from="$OPTARG"
-            if ! [ -d "$copy_from" ]; then
-                die "COPY_FROM_PATH '%s' does not exist" "$copy_from"
-            fi
-            ;;
-        T)
-            testmode=1
-            ;;
-        \? | h)
-            usage
-            ;;
+            n)
+                dry_run=1
+                ;;
+            v)
+                verbose=$((verbose + 1))
+                ;;
+            s)
+                sorted=1
+                random=0
+                ;;
+            r)
+                random=1
+                sorted=0
+                ;;
+            I)
+                fetch_ipfs=0
+                ;;
+            M)
+                fetch_mirrors=0
+                ;;
+            o)
+                outdir="$OPTARG"
+                ;;
+            d)
+                infodir="$OPTARG"
+                if ! [ -d "$infodir" ]; then
+                    die "INFODIR '%s' does not exist" "$infodir"
+                fi
+                ;;
+            i)
+                include="$OPTARG"
+                ;;
+            x)
+                exclude="$OPTARG"
+                ;;
+            t)
+                ipfs_timeout="$OPTARG"
+                ;;
+            c)
+                copy_from="$OPTARG"
+                if ! [ -d "$copy_from" ]; then
+                    die "COPY_FROM_PATH '%s' does not exist" "$copy_from"
+                fi
+                ;;
+            T)
+                testmode=1
+                ;;
+            \? | h)
+                usage
+                ;;
         esac
     done
     shift $((OPTIND - 1))
@@ -102,8 +102,8 @@ process_arguments() {
 
 downloads() {
     # shellcheck disable=SC2016
-    find "$infodir" -iname \*.json -print0 |
-        xargs -0 jq -r '. as { product: $product, version: $version, category: $category, platforms: $platforms } | .downloads[] | [ $product, $version, $category, ( if $platforms then $platforms | join(", ") else "" end ), .name, if .version then .version else "" end, ( if .version_tags then .version_tags | join(", ") else "" end ), .language, .filename, .ipfs_url, (if .mirror_urls then .mirror_urls | join("\t") else "" end ) ] | flatten | join("\t")'
+    find "$infodir" -iname \*.json -print0 \
+        | xargs -0 jq -r '. as { product: $product, version: $version, category: $category, platforms: $platforms } | .downloads[] | [ $product, $version, $category, ( if $platforms then $platforms | join(", ") else "" end ), .name, if .version then .version else "" end, ( if .version_tags then .version_tags | join(", ") else "" end ), .language, .filename, .ipfs_url, (if .mirror_urls then .mirror_urls | join("\t") else "" end ) ] | flatten | join("\t")'
 }
 
 # list_downloads() {
@@ -247,70 +247,70 @@ fetch_downloads() {
     local skip_mirror=0
 
     # shellcheck disable=SC2016,SC2154
-    downloads |
-        filter |
-        sort_downloads |
-        while read_tdf_line product version category platforms dl_name dl_version version_tags language filename ipfs_url mirror_urls; do
+    downloads \
+        | filter \
+        | sort_downloads \
+        | while read_tdf_line product version category platforms dl_name dl_version version_tags language filename ipfs_url mirror_urls; do
             if [ -z "$filename" ]; then
                 die "No filename for $product $version - $dl_name"
             fi
             case "$product" in
-            "AIX")
-                platforms="Unix"
-                ;;
-            "Davong Hard Disk Controller Drivers")
-                platforms="DOS"
-                ;;
-            "LapLink")
-                if [ "$version" = "XL" ]; then
+                "AIX")
+                    platforms="Unix"
+                    ;;
+                "Davong Hard Disk Controller Drivers")
                     platforms="DOS"
-                fi
-                ;;
-            "Microsoft Works")
-                if [ "$version" = "2.x (Mac)" ]; then
-                    platforms="MacOS"
-                fi
-                ;;
-            "Omniview")
-                platforms="DOS"
-                ;;
-            "Schedule+")
-                if [ "$version" = "95 (7.0)" ]; then
-                    platforms="Windows"
-                fi
-                ;;
-            "Tandy Deskmate")
-                if [ "$version" = "DeskMate II" ]; then
+                    ;;
+                "LapLink")
+                    if [ "$version" = "XL" ]; then
+                        platforms="DOS"
+                    fi
+                    ;;
+                "Microsoft Works")
+                    if [ "$version" = "2.x (Mac)" ]; then
+                        platforms="MacOS"
+                    fi
+                    ;;
+                "Omniview")
                     platforms="DOS"
-                fi
-                ;;
+                    ;;
+                "Schedule+")
+                    if [ "$version" = "95 (7.0)" ]; then
+                        platforms="Windows"
+                    fi
+                    ;;
+                "Tandy Deskmate")
+                    if [ "$version" = "DeskMate II" ]; then
+                        platforms="DOS"
+                    fi
+                    ;;
             esac
 
             if echo "$platforms" | grep -q ","; then
                 # Multi-Platform
                 case "$dl_name" in
-                *for\ *\ and*) ;;
-                *\ for\ CPM*)
-                    platforms=CPM
-                    ;;
-                *\ for\ DOS* | *\ for\ PC\ DOS*)
-                    platforms=DOS
-                    ;;
-                *\ for\ Linux*)
-                    platforms=Linux
-                    ;;
-                *\ for\ Mac* | *\ for\ Classic\ Mac* | *PowerMac*)
-                    platforms=MacOS
-                    ;;
-                *\ for\ OS2*)
-                    platforms=OS2
-                    ;;
-                *\ for\ Unix* | *IRIX* | *Xenix* | *HP-UX*)
-                    platforms=Unix
-                    ;;
-                *\ for\ Windows*)
-                    platforms=Windows
-                    ;;
+                    *for\ *\ and*) ;;
+                    *\ for\ CPM*)
+                        platforms=CPM
+                        ;;
+                    *\ for\ DOS* | *\ for\ PC\ DOS*)
+                        platforms=DOS
+                        ;;
+                    *\ for\ Linux*)
+                        platforms=Linux
+                        ;;
+                    *\ for\ Mac* | *\ for\ Classic\ Mac* | *PowerMac*)
+                        platforms=MacOS
+                        ;;
+                    *\ for\ OS2*)
+                        platforms=OS2
+                        ;;
+                    *\ for\ Unix* | *IRIX* | *Xenix* | *HP-UX*)
+                        platforms=Unix
+                        ;;
+                    *\ for\ Windows*)
+                        platforms=Windows
+                        ;;
                 esac
             fi
 
@@ -365,38 +365,54 @@ fetch_downloads() {
                 continue
             fi
 
+            case "$dest" in
+                *International*)
+                    msg "Skipping %s, international build" "$filename"
+                    continue
+                    ;;
+            esac
+
             if [ -z "$dry_run" ]; then
                 mkdir -p "$(dirname "$dest")"
             fi
 
             if [ $fetch_mirrors -eq 1 ] && [ "$skip_mirror" -eq 0 ] && [ -n "$mirror_urls" ]; then
-                echo "$mirror_urls" |
-                    tr '\t' '\n' |
-                    while read -r mirror_url; do
+                echo "$mirror_urls" \
+                    | tr '\t' '\n' \
+                    | while read -r mirror_url; do
                         msg "Fetching %s via mirror (%s)" "$dl_name" "$mirror_url"
-                        if [ -z "$dry_run" ] && download_mirror "$mirror_url" "$tmpdir"; then
-                            tmpfile=$(cd "$tmpdir" && find . -type f | cut -d/ -f2- | head -n 1)
-                            if [ "$dl_name" != "$tmpfile" ]; then
-                                case "$tmpfile" in
-                                */*)
-                                    printf '%s\t%s\n' "$dl_name" "$tmpfile" >>paths.txt
-                                    ;;
-                                esac
+                        if [ -z "$dry_run" ]; then
+                            if download_mirror "$mirror_url" "$tmpdir"; then
+                                tmpfile=$(cd "$tmpdir" && find . -type f | cut -d/ -f2- | head -n 1)
+                                if [ "$dl_name" != "$tmpfile" ]; then
+                                    case "$tmpfile" in
+                                        */*)
+                                            printf '%s\t%s\n' "$dl_name" "$tmpfile" >>paths.txt
+                                            ;;
+                                    esac
+                                fi
+                                run mv "$tmpdir/$tmpfile" "$dest"
+                                break
+                            else
+                                ret=$?
+                                msg "Fetch of %s via mirror %s failed with $ret" "$dl_name" "$mirror_url"
+                                if [ $ret -eq 4 ]; then
+                                    # Client, not server error, don't move to
+                                    # ipfs based fetching
+                                    # continue
+                                    exit 1
+                                fi
                             fi
-                            run mv "$tmpdir/$tmpfile" "$dest"
-                            break
-                        else
-                            msg "Fetch of %s via mirror %s failed" "$dl_name" "$mirror_url"
                         fi
-                    done
+                    done || continue
 
                 if ! [ -e "$dest" ]; then
                     if [ $fetch_ipfs -eq 0 ]; then
                         ret=1
                         return
-                    else
-                        msg_verbose "Skipping further mirror fetches"
-                        skip_mirror=1
+                    # else
+                        # msg_verbose "Skipping further mirror fetches"
+                        # skip_mirror=1
                     fi
                 else
                     continue
@@ -417,8 +433,8 @@ fetch_downloads() {
                     run ipget -o "$dest.new" "$ipfs/$filename"
                 else
                     run ipfs ${ipfs_timeout:+--timeout "$ipfs_timeout"} get --progress --output="$dest.new" "$ipfs/$filename"
-                fi ||
-                    {
+                fi \
+                    || {
                         rm -f "$dest.new"
                         msg "Fetch of %s via ipfs %s failed" "$dl_name" "$ipfs_url"
                         ret=1
@@ -426,7 +442,9 @@ fetch_downloads() {
                     }
 
                 if ! [ -e "$dest.new" ]; then
-                    die "ipfs succeeded for $dl_name but $dest.new does not exist"
+                    msg "ipfs succeeded for $dl_name but $dest.new does not exist"
+                    ret=1
+                    continue
                 fi
 
                 run mv "$dest.new" "$dest"
@@ -452,9 +470,9 @@ sort_downloads() {
             fi
             printf '%s\t%s\n' "$value" "$line"
         done
-    done |
-        sort -k1 -t$'\t' -s -n |
-        cut -d$'\t' -f2-
+    done \
+        | sort -k1 -t$'\t' -s -n \
+        | cut -d$'\t' -f2-
 }
 
 dl_destination() {
@@ -469,12 +487,12 @@ dl_destination() {
         category=Unknown
     fi
     case "$category" in
-    OS)
-        category="Operating Systems"
-        ;;
-    Application | Game | DevTool)
-        category="${category}s"
-        ;;
+        OS)
+            category="Operating Systems"
+            ;;
+        Application | Game | DevTool)
+            category="${category}s"
+            ;;
     esac
     if [ "$language" != English ]; then
         category="$category (International)"
@@ -503,7 +521,18 @@ download_mirror() {
     local tmpdir=$2
 
     rm -rf "${tmpdir:?}"/*
-    (cd "$tmpdir" && run wget -r -np -m -nH --content-disposition --trust-server-names "$url")
+    # (cd "$tmpdir" && run wget -r -np -m -nH --content-disposition --trust-server-names "$url")
+    # (
+    #     # cd "$tmpdir"
+    #     # http --follow --check-status --ignore-stdin --download "$url"
+    # )
+    ret=0
+    aria2c -d "$tmpdir" --remote-time "$url" || ret=$?
+    if [ $ret -eq 3 ]; then
+        return 4
+    else
+        return $ret
+    fi
 }
 
 process_arguments "$@"

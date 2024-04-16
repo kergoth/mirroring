@@ -2,12 +2,76 @@
 
 set -euo pipefail
 
-RSYNC_ARGS="${RSYNC_ARGS:---archive --partial --progress}"
+RSYNC_ARGS="${RSYNC_ARGS:---archive --partial --progress --no-motd --partial-dir=.rsync-partial}"
 
 scriptdir=$(cd "$(dirname "$0")" && pwd)
 
 # shellcheck source=./common.sh
 . "$scriptdir/common.sh"
+
+# process_arguments() {
+#     ARGS=${RSYNC_ARGS:-}
+#     rsync_path=
+#     update=
+#     directory=
+#     while getopts R:uc:a:h opt; do
+#         case "$opt" in
+#             R)
+#                 rsync_path=$OPTARG
+#                 if ! [ -f "$rsync_path" ]; then
+#                     die "Rsync path does not exist: %s" "$rsync_path"
+#                 fi
+#                 ;;
+#         u)
+#             update=1
+#             ;;
+#         c)
+#             directory="$OPTARG"
+#             ;;
+#         a)
+#             ARGS="$OPTARG"
+#             ;;
+#         \? | h)
+#             usage
+#             ;;
+#         esac
+#     done
+#     shift $((OPTIND - 1))
+
+#     if [ -z "$rsync_path" ]; then
+#         rsync_path=$(command -v rsync)
+#     fi
+# }
+
+process_arguments() {
+    ARGS=${WAYBACK_ARGS:-}
+    common_process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    ORIG_OPTIND=$OPTIND
+    OPTIND=0
+    rsync_path=
+    while getopts R:h opt; do
+        case "$opt" in
+            R)
+                rsync_path=$OPTARG
+                if ! [ -f "$rsync_path" ]; then
+                    die "Rsync path does not exist: %s" "$rsync_path"
+                fi
+                ;;
+            \? | h)
+                usage
+                ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    if [ -z "$rsync_path" ]; then
+        rsync_path=$(command -v rsync)
+    fi
+
+    OPTIND=$((OPTIND + ORIG_OPTIND - 1))
+}
 
 process_arguments "$@"
 shift $((OPTIND - 1))
@@ -30,6 +94,6 @@ if [ -e "$dest/.done" ] && [ -z "$update" ]; then
 fi
 
 # shellcheck disable=SC2086
-rsync ${ARGS:-$RSYNC_ARGS} "$@" "$source" "$dest"
+run rsync ${ARGS:-$RSYNC_ARGS} "$@" "$source" "$dest"
 
 touch "$dest/.done"

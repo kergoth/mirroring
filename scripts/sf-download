@@ -29,6 +29,8 @@ usage() {
 main () {
     process_arguments "$@"
     shift $((OPTIND - 1))
+    echo wayback: $wayback
+    echo args: "$@"
 
     tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
     trap 'rm -rf "$tmpdir"' EXIT INT TERM
@@ -195,7 +197,7 @@ run_commands () {
             printf '%s\n' "$cmd"
         else
             # shellcheck disable=SC2059
-            printf "( $fmt )"' || { echo >&2 "Error fetching"; exit 1; }\n' "$cmd" 
+            printf "( $fmt )"' || { echo >&2 "Error fetching"; exit 1; }\n' "$cmd"
         fi
     done | \
     tr '\n' '\0' | \

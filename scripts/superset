@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+list_dirs () {
+    if [ $# -eq 0 ]; then
+    cat dirs.txt \
+        | grep -v '^#' \
+        | grep -v '^ *$' \
+        | cut -d$'\t' -f2 \
+        | tac
+else
+    cat "$@"
+fi \
+    | while read -r dir; do
+        if [ -d "$dir" ]; then
+            echo "$dir"
+        else
+            echo "Directory $dir does not exist" >&2
+        fi
+    done
+}
+
+list_files_only_in_second_dir () {
+    local first=$1
+    shift
+    local second=$1
+    shift
+    # Suppress files only in the first dir
+    # Show files only in the second dir
+    cat "$tmpfile" \
+        | grep -v '^-' \
+        | sed -e 's/^+//'
+}
+
+list_files_only_in_first_dir () {
+    local first=$1
+    shift
+    local second=$1
+    shift
+    # Suppress files only in the first dir
+    # Show files only in the second dir
+    cat "$tmpfile" \
+        | grep -v '^+' \
+        | sed -e 's/^-//'
+}
+
+
+superset_of () {
+    # 1 is a superset of 2 if 2 has nothing that 1 does not
+    [ -z "$(list_files_only_in_second_dir "$@")" ]
+}
+
+
+tmpfile=$(mktemp -t superset.XXXXXX)
+trap 'rm -f "$tmpfile"' EXIT INT TERM
+
+for dir; do
+    for other_dir; do
+                if [ "$dir" = "$other_dir" ]; then
+                    continue
+                fi
+
+                echo "Comparing $dir and $other_dir" >&2
+                # Suppress files in both dirs
+                comm-files -3 "$dir" "$other_dir" -not -name .DS_Store -not -name .done -not -name ._\* >"$tmpfile" 2>/dev/null || continue
+
+                if ! [ -s "$tmpfile" ]; then
+                    echo >&2 "$dir and $other_dir have the same file paths"
+                elif superset_of "$dir" "$other_dir"; then
+                    echo >&2 "$dir is a superset of $other_dir"
+                elif superset_of "$other_dir" "$dir"; then
+                    echo >&2 "$other_dir is a superset of $dir"
+                fi
+            done || :
+    done

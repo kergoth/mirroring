@@ -28,9 +28,9 @@ fetch() {
 }
 
 search() {
-    xh -FI --check-status get "$search_url" sort==most-recent "$@" |
-        pup .media-body a 'attr{href}' |
-        grep '^/product/.*/'
+    xh -FI --check-status get "$search_url" sort==most-recent "$@" \
+        | pup .media-body a 'attr{href}' \
+        | grep '^/product/.*/'
 }
 
 if ! has xh; then
@@ -47,21 +47,37 @@ exclude="LarsonComputing/limsim|microsoft-commercial-internet-system/10"
 search_url=https://winworldpc.com/search/
 page=1
 while true; do
-    search page=="$page" |
-        tr -d ' ' |
-        uniq-seen |
-        sed -e 's#^/#https://winworldpc.com/#' |
-        grep -Ev "$exclude" >"$tmpdir/products" || break
-
-    cat "$tmpdir/products" |
-        while read -r url; do
-            fn=$(echo "$url" | cut -d/ -f5-).html
-            if ! [ -s "$fn" ]; then
-                echo "$url"
-            fi
-        done |
-        tr '\n' '\0' |
-        xargs -tr0 wget --force-directories --no-host-directories --cut-dirs=1 --level inf --no-clobber -e robots=off --adjust-extension --wait=1 --random-wait
-
+    search page=="$page" \
+        | tr -d ' ' || break
     page=$((page + 1))
-done
+done \
+    | uniq-seen \
+    | sed -e 's#^/#https://winworldpc.com/#' \
+    | if [ -n "$exclude" ]; then
+        grep -Ev "$exclude" || :
+    else
+        cat
+    fi >"$tmpdir/products"
+
+# cat "$tmpdir/products" \
+#     | while read -r url; do
+#         fn=$(echo "$url" | cut -d/ -f5-).html
+#         echo "$fn"
+#     done \
+#         | sort -u >"$tmpdir/files"
+
+# find . -name \*.html \
+#     | cut -d/ -f2- \
+#     | sort >"$tmpdir/existing"
+
+# comm -23 "$tmpdir/existing" "$tmpdir/files"
+
+cat "$tmpdir/products" \
+    | while read -r url; do
+        fn=$(echo "$url" | cut -d/ -f5-).html
+        if ! [ -s "$fn" ]; then
+            echo "$url"
+        fi
+    done \
+    | tr '\n' '\0' \
+    | xargs -tr0 wget --force-directories --no-host-directories --cut-dirs=1 --level inf --no-clobber -e robots=off --adjust-extension --wait=1 --random-wait

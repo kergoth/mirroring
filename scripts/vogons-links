@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+    cat <<END >&2
+${0##*/} [options..] URL [URL..]
+
+Gather links from VOGONS posts.
+
+Options:
+
+  -v   Increase verbosity
+  -c   Include comments, not just the main post
+  -w   Include past versions of the URLs using the Wayback Machine
+  -d   Include detail (text of the links)
+  -h   Show usage
+END
+    exit 2
+}
+
+msg() {
+    fmt="$1"
+    if [ $# -gt 1 ]; then
+        shift
+    fi
+    # shellcheck disable=SC2059
+    printf "$fmt\n" "$@" >&2
+}
+
+msg_verbose() {
+    if [ "${verbose:-0}" -ge "1" ]; then
+        msg "$@"
+    fi
+}
+
+msg_debug() {
+    if [ "${verbose:-0}" -ge "2" ]; then
+        msg "$@"
+    fi
+}
+
+die() {
+    msg "$@"
+    exit 1
+}
+
+gather_links() {
+    local vogons_url=$1
+
+    set --
+    if [ $include_detail -eq 1 ]; then
+        set -- -d
+    fi
+    for i in $(seq 1 $verbose); do
+        set -- "$@" -v
+    done
+
+    msg_verbose "Gathering links from $vogons_url"
+    grab-links "$@" -p "$pup_args" "$vogons_url"
+    if [ $include_comments -eq 1 ]; then
+        max_pages=$(curl -fsSL "$vogons_url" | pup ul.pagination .popup_content input\#pagination_0 'attr{max}') || :
+        if [ -n "$max_pages" ]; then
+            page_offset=$((max_pages - 1))
+            last_start=$((page_offset * 20))
+        else
+            last_start=0
+        fi
+
+        for i in $(seq 20 20 "$last_start"); do
+            msg_verbose "Gathering links from $vogons_url&start=$i"
+            grab-links "$@" -p "$pup_args" "$vogons_url&start=$i"
+        done
+    fi
+
+    if [ $include_wayback -eq 1 ]; then
+        msg_verbose "Gathering links from $vogons_url via the Wayback Machine"
+        wayback-links "$@" -p "$pup_args" "$vogons_url"
+        if [ $include_comments -eq 1 ]; then
+            for i in $(seq 20 20 "$last_start"); do
+                msg_verbose "Gathering links from $vogons_url&start=$i"
+                wayback-links "$@" -p "$pup_args" "$vogons_url&start=$i" || break
+            done
+        fi
+    fi
+}
+
+verbose=0
+include_comments=9
+include_wayback=0
+include_detail=0
+while getopts vcwdh opt; do
+    case "$opt" in
+    v)
+        verbose=$((verbose + 1))
+        ;;
+    c)
+        include_comments=1
+        ;;
+    w)
+        include_wayback=1
+        ;;
+    d)
+        include_detail=1
+        ;;
+    \? | h)
+        usage
+        ;;
+    esac
+done
+shift $((OPTIND - 1))
+if [ $# -lt 1 ]; then
+    usage
+fi
+
+for vogons_url; do
+    if [ -z "$vogons_url" ]; then
+        usage
+    fi
+
+    if [ $include_comments -eq 1 ]; then
+        pup_args="sarticle div.post_content a , article div.post_attachments a"
+    else
+        pup_args="section div.post_content a , section div.post_attachments a"
+        if echo "$vogons_url" | grep -q "start="; then
+            die "Main post is only available on the first page. Please pass the URL of the first page."
+        fi
+    fi
+
+    gather_links "$vogons_url" |
+        uniq-seen
+done

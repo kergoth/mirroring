@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+#
+# TODO: in the caller of this script, handle prioritization of matching items for language/variant/etc
+# FIXME: if nopunct creates a '**' where none existed previously, this should be replaced with *
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+trap 'rm -rf "$tmpdir"' EXIT INT TERM HUP
+
+usage() {
+    echo >&2 "${0##*/} [options] FILE_NAME [FILE_NAME..]"
+    exit 2
+}
+
+process_arguments() {
+    nocase=
+    nopunct=
+    originalfile=
+    excludefile=
+    includefile=
+    verbose=0
+    dry_run=
+    while getopts fso:x:X:I:vnh opt; do
+        case "$opt" in
+        f)
+            nocase=1
+            ;;
+        s)
+            nopunct=1
+            ;;
+        o)
+            originalfile="$OPTARG"
+            ;;
+        x)
+            echo "$OPTARG" >>"$tmpdir/exclude.txt"
+            ;;
+        X)
+            excludefile="$OPTARG"
+            if ! [ -f "$excludefile" ]; then
+                die "File not found: %s" "$excludefile"
+            fi
+            ;;
+        I)
+            includefile="$OPTARG"
+            if ! [ -f "$includefile" ]; then
+                die "File not found: %s" "$includefile"
+            fi
+            ;;
+        v)
+            verbose=$((verbose + 1))
+            ;;
+        n)
+            dry_run=1
+            ;;
+        \? | h)
+            usage
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    for file_name; do
+        printf '%s\n' "$file_name" >>"$tmpdir/include.txt"
+    done
+
+    if [ -n "$includefile" ]; then
+        cat "$includefile" >>"$tmpdir/include.txt"
+    fi
+    includefile="$tmpdir/include.txt"
+
+    if [ -n "$excludefile" ]; then
+        cat "$excludefile" >>"$tmpdir/exclude.txt"
+    fi
+    excludefile="$tmpdir/exclude.txt"
+    input="$tmpdir/files.txt"
+}
+
+main() {
+    process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    if [ -n "$nopunct" ]; then
+        if [ -s "$excludefile" ]; then
+            strip_punct <"$excludefile" >>"$excludefile.new" && mv "$excludefile.new" "$excludefile"
+        fi
+        if [ -s "$includefile" ]; then
+            strip_punct <"$includefile" >>"$includefile.new" && mv "$includefile.new" "$includefile"
+        fi
+    fi
+
+    if [ -s "$excludefile" ]; then
+        excluderegex=$(
+            cat "$excludefile" |
+                tr '\n' '\0' |
+                xargs -0 python3 "$scriptdir/glob-to-regex" |
+                sed -e 's#?s:/#?s:(^|/)#; s/^\^//;' |
+                tr '\n' '|' |
+                sed -e 's#|$##' || :
+            echo
+        )
+    else
+        excluderegex=
+    fi
+    if [ -s "$includefile" ]; then
+        includeregex=$(
+            cat "$includefile" |
+                tr '\n' '\0' |
+                xargs -0 python3 "$scriptdir/glob-to-regex" |
+                sed -e 's#?s:/#?s:(^|/)#; s/^\^//;' |
+                tr '\n' '|' |
+                sed -e 's#|$##' || :
+            echo
+        )
+    else
+        includeregex=
+    fi
+
+    if [ -n "$includeregex" ]; then
+        msg_verbose "Inclusion regex: %s" "$includeregex"
+    fi
+    if [ -n "$excluderegex" ]; then
+        msg_verbose "Exclusion regex: %s" "$excluderegex"
+    fi
+
+    # Check for files on disk which should not be present given the parameters
+    # destdir=.
+    # if [ -n "$destdir" ]; then
+    #     {
+    #         if [ -n "$includeregex" ]; then
+    #             cat "$input" | "$scriptdir/pygrep" ${nocase:+-i} -v "$includeregex" || :
+    #         fi
+    #         if [ -n "$excluderegex" ]; then
+    #             cat "$input" | "$scriptdir/pygrep" ${nocase:+-i} "$excluderegex" || :
+    #         fi
+    #     } |
+    #         while read -r fn; do
+    #             if [ -e "$destdir/$fn" ]; then
+    #                 echo "$destdir/$fn"
+    #             fi
+    #         done >"$tmpdir/excluded.txt"
+
+    #     if [ -s "$tmpdir/excluded.txt" ]; then
+    #         echo "These files should not be present:" >&2
+    #         cat "$tmpdir/excluded.txt" | sed -e 's#^#  #' >&2
+    #     fi
+    # fi
+
+    cat >"$input"
+    if [ -n "$nopunct" ]; then
+        strip_punct <"$input" >"$tmpdir/nopunct.txt"
+        paste "$tmpdir/nopunct.txt" "${originalfile:-$input}"
+    else
+        cat "$input"
+    fi |
+        if [ -n "$includeregex" ]; then
+            # shellcheck disable=SC2086
+            run "$scriptdir/pygrep" ${nopunct:+-f 1} ${nocase:+-i} "$includeregex" || :
+        else
+            cat
+        fi |
+        if [ -n "$excluderegex" ]; then
+            run "$scriptdir/pygrep" ${nopunct:+-f 1} ${nocase:+-i} -v "$excluderegex" || :
+        else
+            cat
+        fi |
+        if [ -n "$nopunct" ]; then
+            cut -f2
+        else
+            cat
+        fi
+}
+
+strip_punct() {
+    # We keep / and * for wildcards, but drop other punctuation.
+    sed -e 's/[!"#$%&+,.\:;<=\>?@^_`{\|}~-]\+//g' \
+        -e "s/[']\+//g" \
+        -e "s/   */ /g"
+}
+
+msg() {
+    fmt="$1"
+    if [ $# -gt 1 ]; then
+        shift
+    fi
+    # shellcheck disable=SC2059
+    printf "$fmt\n" "$@" >&2
+}
+
+msg_verbose() {
+    if [ "${verbose:-0}" -ge "1" ]; then
+        msg "$@"
+    fi
+}
+
+msg_debug() {
+    if [ "${verbose:-0}" -ge "2" ]; then
+        msg "$@"
+    fi
+}
+
+die() {
+    msg "$@"
+    exit 1
+}
+
+has() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+abspath() {
+    _path="$1"
+    if [ -n "${_path##/*}" ]; then
+        _path="${2:-$PWD}/$1"
+    fi
+    echo "$_path"
+}
+
+abs_readlink() {
+    for arg; do
+        abspath "$(readlink "$arg")" "$(dirname "$arg")"
+    done
+}
+
+mcd() {
+    # shellcheck disable=SC2164
+    mkdir -p "$1" && cd "$1"
+}
+
+filter() {
+    if [ -n "$include" ]; then
+        grep -E "$include"
+    else
+        cat
+    fi |
+        if [ -n "$exclude" ]; then
+            grep -Ev "$exclude"
+        else
+            cat
+        fi
+}
+
+printcmd() {
+    python3 -c 'import subprocess,sys; print(subprocess.list2cmdline(sys.argv[1:]))' "$@"
+}
+
+run() {
+    if [ "${verbose:-0}" -gt 0 ]; then
+        printf '❯ %s\n' "$(printcmd "$@")" >&2
+    fi
+    if [ -z "${dry_run:-}" ]; then
+        "$@"
+    fi
+}
+
+main "$@"

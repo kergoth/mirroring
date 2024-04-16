@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-WGET_ARGS="${WGET_ARGS:---mirror -kxK -l 0 -np -e robots=off}"
+WGET_ARGS="${WGET_ARGS:---mirror -N -kxK -l 0 -np -e robots=off --user-agent "InconspiuousWebBrowser/1.0" --random-wait --content-disposition}"
 
 scriptdir=$(cd "$(dirname "$0")" && pwd)
 
@@ -30,7 +30,36 @@ unfurl_dest() {
     unfurl json | jq -r '.domain + "/" + .path'
 }
 
-ARGS="$WGET_ARGS"
+process_arguments() {
+    ARGS=${WGET_ARGS:-}
+    common_process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    ORIG_OPTIND=$OPTIND
+    OPTIND=0
+    dest=
+    wget2=
+    while getopts 12D:h opt; do
+        case "$opt" in
+            1)
+                wget2=
+                ;;
+            2)
+                wget2=1
+                ;;
+            D)
+                dest="$OPTARG"
+                ;;
+            \? | h)
+                usage
+                ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    OPTIND=$((OPTIND + ORIG_OPTIND - 1))
+}
+
 process_arguments "$@"
 shift $((OPTIND - 1))
 
@@ -40,19 +69,21 @@ fi
 url=$1
 shift
 
-case "$url" in
-*/)
-    adjusted="$url"
-    ;;
-*)
-    adjusted="$(dirname "$url")"
-    ;;
-esac
+if [ -z "$dest" ]; then
+    case "$url" in
+    */)
+        adjusted="$url"
+        ;;
+    *)
+        adjusted="$(dirname "$url")"
+        ;;
+    esac
 
-if has unfurl; then
-    dest="$(echo "$adjusted" | unfurl_dest)"
-else
-    dest="$(url_dest "${adjusted%/}/")"
+    if has unfurl; then
+        dest="$(echo "$adjusted" | unfurl_dest)"
+    else
+        dest="$(url_dest "${adjusted%/}/")"
+    fi
 fi
 
 if [ -n "$directory" ]; then
@@ -65,6 +96,7 @@ if [ -e "$dest/.done" ] && [ -z "$update" ]; then
 fi
 
 # shellcheck disable=SC2086
-wget ${ARGS:+$ARGS} "$@" "$url"
+wget${wget2:+2} ${ARGS:+$ARGS} "$@" "$url"
 
+find "$dest" -name index.html.tmp -delete
 touch "$dest/.done"

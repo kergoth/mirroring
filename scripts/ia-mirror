@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+IA_ARGS=${IA_ARGS:---no-directories}
+
 set -euo pipefail
 
 scriptdir=$(cd "$(dirname "$0")" && pwd)
@@ -14,19 +16,27 @@ process_arguments() {
 
     ORIG_OPTIND=$OPTIND
     OPTIND=0
-    verbose=
     destdir=
     search=
-    while getopts vd:s:h opt; do
+    glob=
+    includefile=
+    excludefile=
+    while getopts d:s:g:I:X:h opt; do
         case "$opt" in
-        v)
-            verbose=1
-            ;;
         d)
             destdir="$OPTARG"
             ;;
         s)
             search="$OPTARG"
+            ;;
+        g)
+            glob="$OPTARG"
+            ;;
+        I)
+            includefile="$OPTARG"
+            ;;
+        X)
+            excludefile="$OPTARG"
             ;;
         \? | h)
             usage
@@ -64,6 +74,65 @@ if [ -e "$destdir/.done" ] && [ -z "$update" ]; then
 fi
 
 mkdir -p "$destdir"
-ia download ${identifier:+"$identifier"} --no-directories --destdir="$destdir" ${search:+--search=$search} ${ARGS:+$ARGS} "$@"
 
+if [ -n "$includefile" ] || [ -n "$excludefile" ]; then
+    tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+    trap 'rm -rf "$tmpdir"' EXIT INT TERM
+
+    run ia list ${identifier:+"$identifier"} |
+        sed -e '/^\//!s#^#./#' >"$tmpdir/list.txt"
+
+    cat "$tmpdir/list.txt"
+
+    if [ -n "$excludefile" ]; then
+        excluderegex=$(
+            cat "$excludefile" | tr '\n' '\0' | xargs -0 python3 "$scriptdir/glob-to-regex" | tr '\n' '|' | sed -e 's#|$##'
+            echo
+        )
+    fi
+    if [ -n "$includefile" ]; then
+        includeregex=$(
+            cat "$includefile" | tr '\n' '\0' | xargs -0 python3 "$scriptdir/glob-to-regex" | tr '\n' '|' | sed -e 's#|$##'
+            echo
+        )
+    fi
+
+    {
+        if [ -n "$includefile" ]; then
+            cat "$tmpdir/list.txt" | "$scriptdir/pygrep" -v "$includeregex"
+        fi
+        if [ -n "$excludefile" ]; then
+            cat "$tmpdir/list.txt" | "$scriptdir/pygrep" "$excluderegex"
+        fi
+    } |
+        while read -r fn; do
+            if [ -e "$destdir/$fn" ]; then
+                echo "$destdir/$fn"
+            fi
+        done >"$tmpdir/excluded.txt"
+
+    if [ -s "$tmpdir/excluded.txt" ]; then
+        echo "These files should not be present:" >&2
+        cat "$tmpdir/excluded.txt" | sed -e 's#^#  #' >&2
+    fi
+
+    # shellcheck disable=SC2086
+    cat "$tmpdir/list.txt" |
+        if [ -n "$includefile" ]; then
+            # shellcheck disable=SC2086
+            "$scriptdir/pygrep" "$includeregex"
+        else
+            cat
+        fi |
+        if [ -n "$excludefile" ]; then
+            "$scriptdir/pygrep" -v "$excluderegex"
+        else
+            cat
+        fi |
+        tr '\n' '\0' |
+        run xargs -0 ia download ${identifier:+"$identifier"} --destdir="$destdir" $ARGS "$@"
+else
+    # shellcheck disable=SC2086
+    run ia download ${identifier:+"$identifier"} --destdir="$destdir" ${search:+--search="$search"} ${glob:+--glob="$glob"} $ARGS "$@"
+fi
 touch "$destdir/.done"

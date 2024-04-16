@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+#
+# TODO: in the caller of this script, handle prioritization of matching items
+# for language/variant/etc FIXME: if nopunct creates a '**' where none existed
+# previously, this should be replaced with *. Replace inbound '**' with a
+# placeholder, then search and replace for '**' after and then replace the
+# placeholder with '**'.
+
+set -euo pipefail
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+trap 'rm -rf "$tmpdir"' EXIT INT TERM HUP
+
+usage() {
+    cat >&2 <<END
+${0##*/} [options] [PATTERN..]
+
+Search any given input file, or standard input, for lines matching any of the given pattern(s). The pattern(s) are wildcards, similar to rsync's file selection (see \`rsync --files-from=\`). This works best with an input of file paths, due to the way the patterns are interpreted.
+
+Options:
+    -f file, --file=file
+            Read  one  or  more newline separated patterns from file.  Empty pattern lines match every input line.  Newlines are not considered part of a pattern.  If
+            file is empty, nothing is matched.
+    -o original-input-file, --original-input-file=original-input-file
+            Unmodified original input file. This allows one to apply patterns to altered input, but still output the original input.
+    -s, --strip-punct
+            Strip most punctuation from the input and patterns before matching. Characters which are not stripped are /, *, and parentheses.
+    -i, --ignore-case
+            Perform case insensitive matching.
+    -v, --invert-match
+            Invert the sense of matching, to select non-matching lines.
+    -V Increase verbosity
+    -n Dry run
+END
+    exit 2
+}
+
+process_arguments() {
+    file=
+    originalfile=
+    nopunct=
+    nocase=
+    invert=
+    verbose=0
+    dry_run=
+    while getopts f:o:sivVnh opt; do
+        case "$opt" in
+        f)
+            file="$OPTARG"
+            if ! [ -f "$file" ]; then
+                die "File not found: %s" "$file"
+            fi
+            ;;
+        o)
+            originalfile="$OPTARG"
+            if ! [ -f "$originalfile" ]; then
+                die "File not found: %s" "$originalfile"
+            fi
+            ;;
+        s)
+            nopunct=1
+            ;;
+        i)
+            nocase=1
+            ;;
+        v)
+            invert=1
+            ;;
+        V)
+            verbose=$((verbose + 1))
+            ;;
+        n)
+            dry_run=1
+            ;;
+        \? | h)
+            usage
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    if [ -n "$file" ]; then
+        cat "$file" >>"$tmpdir/include.txt"
+    fi
+    includefile="$tmpdir/include.txt"
+    input="$tmpdir/files.txt"
+}
+
+main() {
+    process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    if [ -n "$nopunct" ] && [ -s "$includefile" ]; then
+        strip_punct <"$includefile" >>"$includefile.new" && mv "$includefile.new" "$includefile"
+    fi
+
+    includeregex=$(pattern_to_regex "$@")
+    if [ -n "$includeregex" ]; then
+        msg_verbose "Inclusion regex: %s" "$includeregex"
+    else
+        exit 0
+    fi
+
+    cat >"$input"
+    if [ -n "$nopunct" ]; then
+        strip_punct <"$input" >"$tmpdir/nopunct.txt"
+        paste "$tmpdir/nopunct.txt" "${originalfile:-$input}"
+    else
+        cat "$input"
+    fi |
+        if [ -n "$includeregex" ]; then
+            # shellcheck disable=SC2086
+            run "$scriptdir/pygrep" ${invert:+-v} ${nopunct:+-f 1} ${nocase:+-i} "$includeregex" || :
+        else
+            cat
+        fi |
+        if [ -n "$nopunct" ]; then
+            cut -f2
+        else
+            cat
+        fi
+}
+
+pattern_to_regex() {
+    {
+        for pattern; do
+            printf '%s\n' "$pattern"
+        done
+        if [ -s "$includefile" ]; then
+            cat "$includefile"
+        fi
+    } |
+        tr '\n' '\0' |
+        xargs -0 python3 "$scriptdir/glob-to-regex" --rsync |
+        sed -e 's#?s:/#?s:(^|/)#; s/^\^//;' |
+        tr '\n' '|' |
+        sed -e 's#|$##' || :
+}
+
+strip_punct() {
+    # We keep / and * for wildcards, but drop other punctuation.
+    sed -e 's/[!"#$%&+,.\:;<=\>?@^_`{\|}~-]\+//g' \
+        -e "s/[']\+//g" \
+        -e "s/   */ /g"
+}
+
+msg() {
+    fmt="$1"
+    if [ $# -gt 1 ]; then
+        shift
+    fi
+    # shellcheck disable=SC2059
+    printf "$fmt\n" "$@" >&2
+}
+
+msg_verbose() {
+    if [ "${verbose:-0}" -ge "1" ]; then
+        msg "$@"
+    fi
+}
+
+msg_debug() {
+    if [ "${verbose:-0}" -ge "2" ]; then
+        msg "$@"
+    fi
+}
+
+die() {
+    msg "$@"
+    exit 1
+}
+
+has() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+abspath() {
+    _path="$1"
+    if [ -n "${_path##/*}" ]; then
+        _path="${2:-$PWD}/$1"
+    fi
+    echo "$_path"
+}
+
+abs_readlink() {
+    for arg; do
+        abspath "$(readlink "$arg")" "$(dirname "$arg")"
+    done
+}
+
+mcd() {
+    # shellcheck disable=SC2164
+    mkdir -p "$1" && cd "$1"
+}
+
+filter() {
+    if [ -n "$include" ]; then
+        grep -E "$include"
+    else
+        cat
+    fi |
+        if [ -n "$exclude" ]; then
+            grep -Ev "$exclude"
+        else
+            cat
+        fi
+}
+
+printcmd() {
+    python3 -c 'import subprocess,sys; print(subprocess.list2cmdline(sys.argv[1:]))' "$@"
+}
+
+run() {
+    if [ "${verbose:-0}" -gt 0 ]; then
+        printf '❯ %s\n' "$(printcmd "$@")" >&2
+    fi
+    if [ -z "${dry_run:-}" ]; then
+        "$@"
+    fi
+}
+
+main "$@"

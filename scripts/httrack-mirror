@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+#HTTRACK_ARGS="--connection-per-second=50 --sockets=80 --keep-alive --display --verbose --advanced-progressinfo --disable-security-limits -i -s0 -m -F 'Mozilla/5.0 (X11;U; Linux i686; en-GB; rv:1.9.1) Gecko/20090624 Ubuntu/9.04 (jaunty) Firefox/3.5' -A100000000 -#L500000000"
+#HTTRACK_ARGS="--connection-per-second=0.5 --sockets=80 --keep-alive --display --verbose --advanced-progressinfo --disable-security-limits -s0 -m -A100000000 -#L500000000"
+HTTRACK_ARGS="--connection-per-second=0.5 --sockets=4 --keep-alive --display --verbose --advanced-progressinfo --disable-security-limits -s0 -m -F 'Mozilla/5.0 (X11;U; Linux i686; en-GB; rv:1.9.1) Gecko/20090624 Ubuntu/9.04 (jaunty) Firefox/3.5' -A100000000 -#L500000000"
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+# Argument handling
+die "Unimplemented"
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+if [ -e "$dest/.done" ] && [ -z "$update" ]; then
+    exit 0
+fi
+
+# Main
+
+touch "$dest/.done"

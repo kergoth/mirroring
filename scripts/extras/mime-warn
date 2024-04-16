@@ -6,6 +6,11 @@ TAB=$'\t'
 ret=0
 for filename; do
     mime=$(file -b --mime-type "$filename")
+    if [ "$mime" = "application/octet-stream" ]; then
+        # Binary blobs can have any extension..
+        continue
+    fi
+
     if line=$(grep "^$mime	" "$MIME_TYPES"); then
         base=$(basename "$filename")
         ext=$(echo "$base" | sed -e 's/.*\.//' | tr '[:upper:]' '[:lower:]')

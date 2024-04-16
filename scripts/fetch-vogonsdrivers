@@ -1,0 +1,47 @@
+#!/bin/bash
+
+set -euo pipefail
+
+old_date=
+if [ -f snapshot.txt ]; then
+    old_date=$(cat snapshot.txt)
+fi
+
+ia_name=$(curl -fsSL http://vogonsdrivers.com/snapshot.php | pup a attr\{href\} | sed -ne 's#^https://archive.org/details/##p')
+if [ -z "$ia_name" ]; then
+    echo >&2 "Error: failed to get archive.org snapshot url"
+    exit 1
+fi
+date=$(echo "$ia_name" | cut -d_ -f3)
+if [ -z "$date" ]; then
+    echo >&2 "Error: failed to determine snapshot date from archive.org item"
+    exit 1
+fi
+
+if [ "$date" = "$old_date" ]; then
+    # Nothing to do
+    exit 0
+fi
+
+mkdir -p "$ia_name"
+ia download -d "$ia_name" files.7z catalog_"$date".csv \
+    | aria2c -- --dir="$ia_name" --auto-file-renaming=false --continue=true --input-file=- --file-allocation=none
+mv "$ia_name"/catalog_"$date".csv catalog.csv
+cat catalog.csv \
+    | csvcut -c filename,filetitle \
+    | csvformat -E -T \
+    | while IFS=$'\t' read -r filename filetitle; do
+        case "$filename" in
+            *\ *)
+                printf '"%s" %s\n' "$filename" "$filetitle"
+                ;;
+            *)
+                printf '%s %s\n' "$filename" "$filetitle"
+                ;;
+        esac
+    done \
+    | unix2dos >DESCRIPT.ION
+7z e "$ia_name"/files.7z
+rm -rf "$ia_name"
+
+echo "$date" >snapshot.txt

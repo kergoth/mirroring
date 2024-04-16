@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+first=1
+
+msg() {
+    fmt="$1"
+    # shellcheck disable=SC2059
+    printf "$fmt\n" "$@" >&2
+}
+
+die() {
+    msg "$@"
+    exit 1
+}
+
+has() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+fetch() {
+    if [ $first -eq 0 ]; then
+        sleep 2
+    fi
+    curl -fsSL "$@"
+    first=0
+}
+
+search() {
+    xh -FI --check-status get "$search_url" sort==most-recent "$@" |
+        pup .media-body a 'attr{href}' |
+        grep '^/product/.*/'
+}
+
+if ! has xh; then
+    die "xh must be installed"
+fi
+
+tmpdir=$(mktemp -d -t "${0##*/}.XXXXXX")
+trap 'rm -rf "$tmpdir"' EXIT INT TERM
+
+mkdir -p ProductInfo
+cd ProductInfo
+
+#exclude="LarsonComputing/limsim|microsoft-commercial-internet-system/10"
+exclude=
+search_url=https://winworldpc.com/search/
+page=1
+while true; do
+    search page=="$page" |
+        tr -d ' ' |
+        uniq-seen |
+        sed -e 's#^/#https://winworldpc.com/#' |
+        if [ -n "$exclude" ]; then
+            grep -Ev "$exclude" || :
+        else
+            cat
+        fi >"$tmpdir/products" || break
+
+    cat "$tmpdir/products" |
+        while read -r url; do
+            fn=$(echo "$url" | cut -d/ -f5-).html
+            if ! [ -s "$fn" ]; then
+                echo "$url"
+            fi
+        done |
+        tr '\n' '\0' |
+        xargs -tr0 wget --force-directories --no-host-directories --cut-dirs=1 --level inf --no-clobber -e robots=off --adjust-extension --wait=1 --random-wait
+
+    page=$((page + 1))
+done

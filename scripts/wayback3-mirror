@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+WAYBACK_ARGS="${WAYBACK_ARGS:---all-timestamps}"
+per_file_delay=3s
+
+scriptdir=$(cd "$(dirname "$0")" && pwd)
+PATH="$scriptdir:$scriptdir/extras:$PATH"
+
+# shellcheck source=./common.sh
+. "$scriptdir/common.sh"
+
+url_dest() {
+    local url=$1
+    dest="${url#*://}"
+    case "$dest" in
+    */) ;;
+    *)
+        dest="$(dirname "$dest")"
+        ;;
+    esac
+    echo "$dest"
+}
+
+process_arguments() {
+    ARGS=${WAYBACK_ARGS:-}
+    common_process_arguments "$@"
+    shift $((OPTIND - 1))
+
+    ORIG_OPTIND=$OPTIND
+    OPTIND=0
+    aria=0
+    dest=
+    wayback_args=
+    merged_path=
+    while getopts Ad:w:m:h opt; do
+        case "$opt" in
+        A)
+            aria=1
+            ;;
+        d)
+            dest="$OPTARG"
+            ;;
+        w)
+            wayback_args="$OPTARG"
+            ;;
+        m)
+            merged_path=$OPTARG
+            ;;
+        \? | h)
+            usage
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    OPTIND=$((OPTIND + ORIG_OPTIND - 1))
+
+    if [ $# -lt 1 ]; then
+        die "Usage: %s URL [DESTINATION [ARGS..]]" "${0##*/}"
+    fi
+
+    if [ -z "$dest" ]; then
+        if has unfurl; then
+            dest="$(echo "$url" | unfurl domains)_IA"
+        else
+            dest=$(url_dest "${url%/*}")_IA
+        fi
+    fi
+
+    if [ -z "$merged_path" ]; then
+        merged_path="${dest%/}_merged"
+    fi
+}
+
+list_timestamped() {
+    find "$1" -mindepth 1 -maxdepth 1 -type d ${2:+$2} -iname '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+}
+
+list_not_timestamped() {
+    list_timestamped "$1" -not
+}
+
+process_arguments "$@"
+shift $((OPTIND - 1))
+
+if [ -n "$directory" ]; then
+    mkdir -p "$directory"
+    cd "$directory"
+fi
+
+if [ -e "$dest/.done" ] && [ -z "$update" ]; then
+    exit 0
+fi
+
+for url; do
+    if [ $aria -eq 1 ]; then
+        # shellcheck disable=SC2086
+        run wayback_machine_downloader ${ARGS:+$ARGS} $wayback_args -l -d "$dest" "$url" |
+            jq -r '.[] | [.file_url, .file_id] | join("\t")' |
+            while IFS=$'\t' read -r url id; do
+                date=${id%%/*}
+                mkdir -p "$dest/$(dirname "$id")"
+                if [ -e "$dest/$id" ]; then
+                    continue
+                fi
+
+                set -x
+                aria2c --log-level=debug --timeout=30 --retry-wait=3 --remote-time=true --auto-file-renaming=false --continue=true --file-allocation=none -o "$dest/$id" "https://web.archive.org/web/${date}id_/$url" || exit $?
+                set +x
+                sleep "$per_file_delay"
+            done
+    else
+        # shellcheck disable=SC2086
+        run wayback_machine_downloader ${ARGS:+$ARGS} $wayback_args -d "$dest" "$url"
+    fi
+done
+
+if ! [ -e "$dest" ]; then
+    die "No files downloaded"
+fi
+
+# Wayback machine downloader sets creation dates, not modification dates,
+# on macOS
+run creationdate -vt -x .done "$dest"
+
+# shellcheck disable=SC2046
+if [ $(list_timestamped "$dest" | wc -l) -gt 0 ] && [ $(list_not_timestamped "$dest" | wc -l) -eq 0 ]; then
+    run wayback-merge "$dest" "$merged_path"
+    run creationdate -v -x .done "$merged_path"
+fi
+
+touch "$dest/.done"
